@@ -15,7 +15,7 @@ from googleapiclient.errors import HttpError
 from pathlib import Path
 from pdf_parser import extract_text_from_pdf
 from qb_service.quickstart import InvoiceDraft, InvoiceLine, QuickBooksInvoiceService
-
+from attachments import fetch_messages_with_attachments
 
 
 # If modifying these scopes, delete the file token.json.
@@ -26,13 +26,7 @@ SCOPES = [
 ]
 
 
-
-
-
 def load_creds():
-  """Shows basic usage of the Gmail API.
-  Lists the user's Gmail labels.
-  """
   creds = None
   # The file token.json stores the user's access and refresh tokens, and is
   # created automatically when the authorization flow completes for the first
@@ -44,15 +38,16 @@ def load_creds():
     if creds and creds.expired and creds.refresh_token:
       creds.refresh(Request())
     else:
-      flow = InstalledAppFlow.from_client_secrets_file(
+
+        installedappflow.from_client_secrets_file(
           "credentials.json", SCOPES
-      )
-      creds = flow.run_local_server(port=0)
+        )
+        creds = flow.run_local_server(port=0)
     # Save the credentials for the next run
     with open("token.json", "w") as token:
       token.write(creds.to_json())
   return creds
-
+service = build("gmail", "v1", credentials=load_creds())
 
 
 #decode the emails using utf-8
@@ -72,171 +67,41 @@ def decode_bytes(encoded: str) -> bytes:
 
 
 
+#make sure there is a proper label
+def get_or_create_label(service, label_name):
+      """Get label ID by name, or create if it doesn't exist"""
+      # List all labels
+      results = service.users().labels().list(userId='me').execute()
+      labels = results.get('labels', [])
 
+      # Check if label exists
+      for label in labels:
+          if label['name'].lower() == label_name.lower():
+              return label['id']
 
-def get_message_id(max_results: int = 10):
-    service = build("gmail", "v1", credentials=load_creds())
-    message_ids = []
-    results = service.users().messages().list(
-        userId="me",
-        maxResults=max_results,
-        q="is:unread"
-    ).execute()
-    message_refs = results.get("messages", [])
-    print(f"Received {len(message_refs)} message reference(s).")
-    for ref in message_refs:
-        message_ids.append(ref["id"])
-    return message_ids
+      # Create label if it doesn't exist
+      label_object = {
+          'name': label_name,
+          'labelListVisibility': 'labelShow',
+          'messageListVisibility': 'show'
+      }
+      created_label = service.users().labels().create(
+          userId='me',
+          body=label_object
+      ).execute()
 
-
-
-#grab all the emails and run them through the decorder
-def get_messages(max_results: int = 10):
-    service = build("gmail", "v1", credentials=load_creds())
-    message_text = []
-    results = service.users().messages().list(
-        userId="me",
-        maxResults=max_results,
-    ).execute()
-    message_refs = results.get("messages", [])
-    for idx, ref in enumerate(message_refs, start=1):
-        msg = service.users().messages().get(
-            userId="me",
-            id=ref["id"],
-            format="full",
-        ).execute()
-        payload = msg.get("payload", {})
-        body = payload.get("body", {})
-        raw_data = body.get("data", "")
-
-        if not raw_data:
-            for parts in payload.get("parts", []):
-                raw_data = parts.get("body", {}).get("data", "")
-                if raw_data:
-                    break
-
-        decoded = decode_data(raw_data)
-        if not decoded:
-            print(f"[{idx}/{len(message_refs)}] {ref['id']}: no decodable body, skipping.")
-            continue
-
-        soup = BeautifulSoup(decoded, "html.parser")
-        message_text.append((ref["id"], soup.get_text(separator="", strip=True)))
-        print(f"[{idx}/{len(message_refs)}] {ref['id']}: message decoded.")
-    return message_text
+      return created_label['id']
 
 
 
-#Get the email attachment
-def get_attachment(max_results: int = 10):
-    service = build("gmail", "v1", credentials=load_creds())
-
-    results = service.users().messages().list(userId="me", maxResults=max_results,).execute()
-
-    for ref in results.get("messages",[]):
-        msg = service.users().messages().get(
-            userId="me",
-            id=ref["id"],
-            format="full",
-        ).execute()
-        payload = msg.get("payload", {})
-        parts_to_inspect = [payload]
-
-        while parts_to_inspect:
-            part = parts_to_inspect.pop()
-            filename = part.get("filename")
-            body = part.get("body", {})
-
-            inline_data = body.get("data")
-            if filename and inline_data:
-                yield filename, decode_bytes(inline_data)
-                continue
-
-            attachment_id = body.get("attachmentId")
-            if filename and attachment_id:
-                attachment = service.users().messages().attachments().get(
-                    userId="me",
-                    messageId=ref["id"],
-                    id=attachment_id,
-                ).execute()
-                yield filename, decode_bytes(attachment.get("data", ""))
-
-            parts_to_inspect.extend(part.get("parts", []))
 
 
-def fetch_messages_with_attachments(max_results: int = 10, query: Optional[str] = None):
-    service = build("gmail", "v1", credentials=load_creds())
 
-    list_params = {
-        "userId": "me",
-        "maxResults": max_results,
-        "q":"is:unread",
-    }
-    if query:
-        list_params["q"] = query
-
-    results = service.users().messages().list(**list_params).execute()
-
-    for ref in results.get("messages", []):
-        msg = service.users().messages().get(
-            userId="me",
-            id=ref["id"],
-            format="full",
-        ).execute()
-        payload = msg.get("payload", {})
-        headers = {
-            h.get("name", "").lower(): h.get("value", "")
-            for h in payload.get("headers", [])
-        }
-        subject = headers.get("subject", "")
-
-        body = payload.get("body", {})
-        raw_data = body.get("data", "")
-        if not raw_data:
-            for part in payload.get("parts", []):
-                raw_data = part.get("body", {}).get("data", "")
-                if raw_data:
-                    break
-
-        message_text = ""
-        if raw_data:
-            decoded = decode_data(raw_data)
-            if decoded:
-                soup = BeautifulSoup(decoded, "html.parser")
-                message_text = soup.get_text(separator="", strip=True)
-
-        attachments = []
-        parts_to_inspect = [payload]
-        while parts_to_inspect:
-            part = parts_to_inspect.pop()
-            filename = part.get("filename")
-            part_body = part.get("body", {})
-
-            inline_data = part_body.get("data")
-            if filename and inline_data:
-                attachments.append((filename, decode_bytes(inline_data)))
-                continue
-
-            attachment_id = part_body.get("attachmentId")
-            if filename and attachment_id:
-                attachment = service.users().messages().attachments().get(
-                    userId="me",
-                    messageId=ref["id"],
-                    id=attachment_id,
-                ).execute()
-                attachments.append((filename, decode_bytes(attachment.get("data", ""))))
-
-            parts_to_inspect.extend(part.get("parts", []))
-
-        yield ref["id"], subject, message_text, attachments
 
 class LabelSort(BaseModel):
     label: Literal["invoice", "none"]
 
-label_lookup = {
-    "invoice": "Invoice",
-    "none": "",
-}
+
 
 
 class InvoiceLinePayload(BaseModel):
@@ -247,36 +112,42 @@ class InvoiceLinePayload(BaseModel):
 
 
 class InvoicePayload(BaseModel):
-    customer_display_name: str
-    customer_company_name: Optional[str] = None
+    vendor_display_name: str
     memo: Optional[str] = None
     items: List[InvoiceLinePayload]
     total_amount: Optional[float] = None
 
-def ai_invoice(message_text: str, client: Optional[OpenAI] = None):
-    if client is None:
-        client = OpenAI()
+def ai_invoice(message_text: str,attachments:list = None, client: Optional[OpenAI] = None):
+     context= message_text
 
-    response = client.responses.parse(
+     if attachments:
+         context +="\n\nAttachments found:\n"
+         for filename, data in attachments:
+             context += f"- {filename}\n"
+     response = client.responses.parse(
         model="gpt-4o-2024-08-06",
          input=[
-        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If it is an email return: Invoice and if not return: none. Those with attachments should be labeled as invoices"},
+        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If it is an email return: invoice and if not return: none."},
         {
             "role": "user",
-            "content": "{message_text}",
+            "content": context,
         },
     ],
         text_format=LabelSort,  # your structured output class
     )
 
 
-    chosen_label = response.output_parsed.label.strip().lower()
-    return chosen_label
+     return response.output_parsed.label
 
 
 
+def build_invoice_draft(message_text: str, client=OpenAI, attachments:list=None) -> Optional[InvoiceDraft]:
+    context= message_text
+    if attachments:
+        context +="\n\nAttachments found:\n"
+        for filename, data in attachments:
+            context += f"-{filename}\n"
 
-def build_invoice_draft(message_text: str, client: OpenAI) -> Optional[InvoiceDraft]:
     response = client.responses.parse(
         model="gpt-4o-2024-08-06",
         input=[
@@ -286,13 +157,20 @@ def build_invoice_draft(message_text: str, client: OpenAI) -> Optional[InvoiceDr
                     "Extract structured invoice data from the email. "
                     "Always respond with JSON matching the schema. "
                     "If you do not find invoice information, return an empty items list."
+                    "Our company name is Cape Property Pros, and we are always the reciever of the invoice"
                 ),
             },
-            {"role": "user", "content": message_text},
+            {"role": "user", "content": context},
         ],
         text_format=InvoicePayload,
     )
     payload = response.output_parsed
+    print(f"Payload: {payload}")
+    if payload:
+        print(f"Items: {payload.items}")
+        print(f"Vendor: {payload.vendor_display_name}")
+
+
     if not payload or not payload.items:
         return None
 
@@ -306,11 +184,12 @@ def build_invoice_draft(message_text: str, client: OpenAI) -> Optional[InvoiceDr
         for item in payload.items
         if item.item_name and item.rate is not None
     ]
-    if not line_items or not payload.customer_display_name:
+    if not line_items or not payload.vendor_display_name:
         return None
+
     return InvoiceDraft(
-        customer_display_name=payload.customer_display_name,
-        customer_company_name=payload.customer_company_name,
+        customer_display_name=payload.vendor_display_name,
+        customer_company_name=None,
         memo=payload.memo,
         line_items=line_items,
         total_amount=payload.total_amount,
@@ -318,73 +197,60 @@ def build_invoice_draft(message_text: str, client: OpenAI) -> Optional[InvoiceDr
 
 
 def main():
+    get_or_create_label(service,"ai_checked")
     download_dir = Path("attachments")
     download_dir.mkdir(exist_ok=True)
     qb_service = QuickBooksInvoiceService()
     openai_client = OpenAI()
-    messages = list(
-            fetch_messages_with_attachments(max_results=10, query="in:inbox -label:Read")
-        )
-    label_service = None
+    messages = list(fetch_messages_with_attachments(max_results=10))
 
-    invoice_label_id: Optional[str] = None
-
-    label_service = build("gmail", "v1", credentials=load_creds())
-
-
+    # Process messages
     for idx, (message_id, subject, message_text, attachments) in enumerate(messages, start=1):
-        label = ai_invoice(message_text, client=openai_client)
+        label = ai_invoice(message_text, attachments, client=openai_client)
         print(f"[{idx}/{len(messages)}] {message_id}: subject -> {subject} label -> {label}")
 
-        if label == "Invoice":
+        if label == "invoice":
+            print("hello")
+            # Try to build draft from message text first
+            draft = build_invoice_draft(message_text=message_text, attachments=attachments, client=openai_client)
+            print(f"Draft from message text: {draft}")
+            # If we have PDF attachments, try to extract invoice from them
             for filename, data in attachments:
-                target = download_dir / filename
-                target.write_bytes(data)
-                print(f"[{idx}/{len(messages)}] {message_id}: saved attachment {filename} to {target}")
+                print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")
+                if isinstance(data, str):  # PDF text already extracted
+                    print(f"[{idx}/{len(messages)}] {message_id}: processing PDF {filename}")
+                    pdf_draft = build_invoice_draft(message_text=data, client=openai_client)
+                    if pdf_draft and pdf_draft.line_items:
+                        draft = pdf_draft
+                        break
+                else:  # Binary attachment (non-PDF)
+                    target = download_dir / filename
+                    target.write_bytes(data)
+                    print(f"[{idx}/{len(messages)}] {message_id}: saved attachment {filename}")
 
-                if target.suffix.lower() != ".pdf":
-                    pdf_text = extract_text_from_pdf(target)
-                    draft = build_invoice_draft(pdf_text, client=openai_client)
-                    calculated_total = sum(line.amount for line in draft.line_items)
-
-                    if draft.total_amount is not None:
-                        if abs(draft.total_amount - calculated_total) > 0.01:
-                            print(f"[{idx}/{len(messages)}] {message_id}: "f"total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
-                    else:
-                        draft.total_amount = calculated_total
-
-                        print(f"[{idx}/{len(messages)}] {message_id}: line items parsed from {filename}:")
-                else:
-                    print("no invoice")
+            # If we have a valid draft, push to QuickBooks
+            if draft and draft.line_items:
+                print(f"[{idx}/{len(messages)}] {message_id}: line items:")
                 for line in draft.line_items:
                     print("   ", line.model_dump())
 
-                    invoice = qb_service.push_invoice(draft)
-
-
-                    invoice_id = getattr(invoice, "Id", None)
-
-                    draft = build_invoice_draft(message_text, client=openai_client)
-                    calculated_total = sum(line.amount for line in draft.line_items)
-                    if draft.total_amount is not None:
-                        if abs(draft.total_amount - calculated_total) > 0.01:
-                            print(
-                                f"[{idx}/{len(messages)}] {message_id}: "
-                                f"total mismatch (draft={draft.total_amount}, calculated={calculated_total})"
-                             )
-                    else:
-                        draft.total_amount = calculated_total
-
-                    print(f"[{idx}/{len(messages)}] {message_id}: line items parsed from message body:")
-                    for line in draft.line_items:
-                        print("   ", line.model_dump())
-
-                        invoice = qb_service.push_invoice(draft)
-                        invoice_id = getattr(invoice, "Id", None)
-                    if invoice_id:
-                        print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id}).")
-                    else:
-                        print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created.")
+                # Calculate and verify total
+                calculated_total = sum(line.amount for line in draft.line_items)
+                if draft.total_amount is not None:
+                    if abs(draft.total_amount - calculated_total) > 0.01:
+                        print(f"[{idx}/{len(messages)}] {message_id}: total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
+                else:
+                    draft.total_amount = calculated_total
+                    print(draft.total_amount)
+                # Push to QuickBooks
+                invoice = qb_service.push_invoice(draft)
+                invoice_id = getattr(invoice, "Id", None)
+                if invoice_id:
+                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id})")
+                else:
+                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created")
+            else:
+                print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
 
 
 if __name__ == "__main__":
