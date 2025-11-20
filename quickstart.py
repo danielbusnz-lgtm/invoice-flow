@@ -14,9 +14,9 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from pathlib import Path
 from pdf_parser import extract_text_from_pdf
-from qb_service.quickstart import InvoiceDraft, InvoiceLine, QuickBooksInvoiceService
+from qb_service.quickstart1 import InvoiceDraft, InvoiceLine, QuickBooksInvoiceService
 from attachments import fetch_messages_with_attachments
-
+import time
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = [
@@ -212,8 +212,7 @@ def main():
         if label == "invoice":
             print("hello")
             # Try to build draft from message text first
-            draft = build_invoice_draft(message_text=message_text, attachments=attachments, client=openai_client)
-            print(f"Draft from message text: {draft}")
+
             # If we have PDF attachments, try to extract invoice from them
             for filename, data in attachments:
                 print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")

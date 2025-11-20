@@ -6,8 +6,8 @@ from intuitlib.enums import Scopes
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8000/callback")
-ENVIRONMENT = os.getenv("INTUIT_ENVIRONMENT", "sandbox")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl")
+ENVIRONMENT = os.getenv("INTUIT_ENVIRONMENT", "production")
 
 
 
