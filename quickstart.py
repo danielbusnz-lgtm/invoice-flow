@@ -39,7 +39,7 @@ def load_creds():
       creds.refresh(Request())
     else:
 
-        installedappflow.from_client_secrets_file(
+        flow = InstalledAppFlow.from_client_secrets_file(
           "credentials.json", SCOPES
         )
         creds = flow.run_local_server(port=0)
@@ -94,28 +94,9 @@ def get_or_create_label(service, label_name):
 
 
 
-
-
-
-
 class LabelSort(BaseModel):
     label: Literal["invoice", "none"]
 
-
-
-
-class InvoiceLinePayload(BaseModel):
-    item: str
-    rate: float
-    quantity: float = 1.0
-    description: Optional[str] = None
-
-
-class InvoicePayload(BaseModel):
-    vendor_display_name: str
-    memo: Optional[str] = None
-    items: List[InvoiceLinePayload]
-    total_amount: Optional[float] = None
 
 def ai_invoice(message_text: str, attachments: list = None, client: Optional[OpenAI] = None):
      if client is None:
@@ -150,6 +131,7 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
 
     context= message_text
     if attachments:
+        print("has attachments")
         context +="\n\nAttachments found:\n"
         for filename, data in attachments:
             context += f"-{filename}\n"
@@ -168,16 +150,16 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
             },
             {"role": "user", "content": context},
         ],
-        text_format=InvoicePayload,
+        text_format=InvoiceDraft,
     )
     payload = response.output_parsed
-    print(f"Payload: {payload}")
-    if payload:
-        print(f"Items: {payload.items}")
-        print(f"Vendor: {payload.vendor_display_name}")
+    #print(f"Payload: {payload}")
+    #if payload:
+     #   print(f"Items: {payload.line_items}")
+      #  print(f"Vendor: {payload.vendor_display_name}")
 
 
-    if not payload or not payload.items:
+    if not payload or not payload.line_items:
         return None
 
     line_items = [
@@ -187,15 +169,14 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
             quantity=item.quantity,
             description=item.description,
         )
-        for item in payload.items
+        for item in payload.line_items
         if item.item and item.rate is not None
     ]
     if not line_items or not payload.vendor_display_name:
         return None
 
     return InvoiceDraft(
-        customer_display_name=payload.vendor_display_name,
-        customer_company_name=None,
+        vendor_display_name=payload.vendor_display_name,
         memo=payload.memo,
         line_items=line_items,
         total_amount=payload.total_amount,
@@ -203,24 +184,28 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
 
 
 def main():
+    creds = load_creds()
+    service = build("gmail", "v1", credentials=creds)
     get_or_create_label(service,"ai_checked")
     download_dir = Path("attachments")
     download_dir.mkdir(exist_ok=True)
-    qb_service = QuickBooksInvoiceService()
+    qb_service = QuickbooksInvoiceService()
     openai_client = OpenAI()
     messages = list(fetch_messages_with_attachments(max_results=10))
-
+    
     # Process messages
     for idx, (message_id, subject, message_text, attachments) in enumerate(messages, start=1):
+        draft=None
         label = ai_invoice(message_text, attachments, client=openai_client)
         print(f"[{idx}/{len(messages)}] {message_id}: subject -> {subject} label -> {label}")
 
         if label == "invoice":
-            print("hello")
-            # Try to build draft from message text first
-
+            
+            draft = build_invoice_draft(message_text=message_text,client=openai_client)
+            print(draft)
             # If we have PDF attachments, try to extract invoice from them
             for filename, data in attachments:
+                
                 print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")
                 if isinstance(data, str):  # PDF text already extracted
                     print(f"[{idx}/{len(messages)}] {message_id}: processing PDF {filename}")
@@ -234,8 +219,10 @@ def main():
                     print(f"[{idx}/{len(messages)}] {message_id}: saved attachment {filename}")
 
             # If we have a valid draft, push to QuickBooks
-            if draft and draft.line_items:
+            if draft:
                 print(f"[{idx}/{len(messages)}] {message_id}: line items:")
+                service = QuickbooksInvoiceService()
+                service.push_invoice(draft)
                 for line in draft.line_items:
                     print("   ", line.model_dump())
 
