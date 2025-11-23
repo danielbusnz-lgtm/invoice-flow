@@ -96,11 +96,11 @@ def get_or_create_label(service, label_name):
 
 
 #get the message and its attachment if provided
-def fetch_messages_with_attachments(max_results: int = 10, query: Optional[str] = None):
+def fetch_messages_with_attachments(max_results: int = 1, query: Optional[str] = None):
     list_params = {
         "userId": "me",
         "maxResults": max_results,
-        "q":" -label:ai_checked"
+        #"q":" -label:ai_checked"
     }
     results = service.users().messages().list(**list_params).execute()
     for ref in results.get("messages", []):
@@ -222,7 +222,7 @@ def main():
     openai_client = OpenAI()
 
     # Iterate through the generator
-    for message_id, subject, message_text, attachments in fetch_messages_with_attachments(max_results=10):
+    for message_id, subject, message_text, attachments in fetch_messages_with_attachments(max_results=1):
         print(f"\n--- Message ID: {message_id} ---")
         print(f"Subject: {subject}")
         print(f"Message Text: {message_text[:100]}...")  # First 100 chars
