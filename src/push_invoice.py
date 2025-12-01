@@ -31,6 +31,7 @@ class InvoiceDraft(BaseModel):
     vendor_company_name: Optional[str] = None
     line_items: List[InvoiceLine]
     memo: Optional[str] = None
+    tax: Optional[float]=None
     total_amount: Optional[float] = None
 
 
@@ -80,15 +81,15 @@ class QuickbooksInvoiceService:
 
     def push_invoice(self,draft) -> Bill:
         bill = Bill()
-        total =0
         vendor = self.ensure_vendors(draft)
         bill.VendorRef=vendor.to_ref()
+        total= draft.total_amount
         for line in draft.line_items:
             qb_line = AccountBasedExpenseLine()
             
             qb_line.DetailType = "AccountBasedExpenseLineDetail"
             qb_line.Amount=line.amount
-            total += qb_line.Amount
+            #total += qb_line.Amount
             rounded_total= round(total,2)
             account_ref = Ref()
             account_ref.type = "Account"

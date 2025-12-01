@@ -121,7 +121,7 @@ def ai_invoice(message_text: str, attachments: list = None, client: Optional[Ope
      response = client.responses.parse(
         model="gpt-4o-2024-08-06",
          input=[
-        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If it is an email return: invoice and if not return: none."},
+        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not.If there is an attachment, it is likely an invoice. If it is an email return: invoice and if not return: none."},
         {
             "role": "user",
             "content": context,
@@ -189,6 +189,7 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
         vendor_display_name=payload.vendor_display_name,
         memo=payload.memo,
         line_items=line_items,
+        tax=payload.tax,
         total_amount=payload.total_amount,
     )
 
@@ -241,12 +242,13 @@ def main():
                 #delete this line service = QuickbooksInvoiceService()
                 
                 ####TAKE A LOOK AT THIS 
-                service.push_invoice(draft)
+                qb_service.push_invoice(draft)
                 for line in draft.line_items:
                     print("   ", line.model_dump())
 
                 # Calculate and verify total
-                calculated_total = sum(line.amount for line in draft.line_items)
+                calculated_total = draft.total_amount
+                #sum(line.amount for line in draft.line_items)+tax
                 if draft.total_amount is not None:
                     if abs(draft.total_amount - calculated_total) > 0.01:
                         print(f"[{idx}/{len(messages)}] {message_id}: total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
