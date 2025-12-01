@@ -98,11 +98,16 @@ def get_or_create_label(service, label_name):
       return created_label['id']
 
 
-
+#structured output class
 class LabelSort(BaseModel):
     label: Literal["invoice", "none"]
 
 
+
+
+
+
+#function for using open ai to classifiy emails as either invoice or not
 def ai_invoice(message_text: str, attachments: list = None, client: Optional[OpenAI] = None):
      if client is None:
          client = OpenAI()
@@ -234,6 +239,8 @@ def main():
             if draft:
                 print(f"[{idx}/{len(messages)}] {message_id}: line items:")
                 #delete this line service = QuickbooksInvoiceService()
+                
+                ####TAKE A LOOK AT THIS 
                 service.push_invoice(draft)
                 for line in draft.line_items:
                     print("   ", line.model_dump())
