@@ -49,8 +49,21 @@ class QuickbooksInvoiceService:
             refresh_token=os.getenv('QB_REFRESH_TOKEN'),
             company_id=os.getenv('QB_REALM_ID'),
 	    )
-
-
+        self._save_refresh_token()
+    
+    def _save_refresh_token(self):
+        new_token= self.qb_client.auth_client.refresh_token
+        from pathlib import Path
+        env_path = Path(__file__).parent.parent/ '.env'
+        with open(env_path, 'r') as f:
+            lines = f.readlines()
+        with open(env_path, 'w') as f:
+            for line in lines:
+                if line.startswith('QB_REFRESH_TOKEN='):
+                    f.write(f'QB_REFRESH_TOKEN={new_token}\n')
+                else:
+                    f.write(line)
+        
     def ensure_vendors(self, draft) -> Vendor:
         all_vendors=Vendor.all(qb =self.qb_client)
        
@@ -89,7 +102,7 @@ class QuickbooksInvoiceService:
             
             qb_line.DetailType = "AccountBasedExpenseLineDetail"
             qb_line.Amount=line.amount
-            #total += qb_line.Amount
+            
             rounded_total= round(total,2)
             account_ref = Ref()
             account_ref.type = "Account"

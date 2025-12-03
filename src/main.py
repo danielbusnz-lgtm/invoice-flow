@@ -3,6 +3,7 @@ import os.path
 from enum import Enum
 from pydantic import BaseModel
 import base64
+from quickbooks import QuickBooks
 from bs4 import BeautifulSoup
 from pydantic import BaseModel
 from openai import OpenAI
@@ -18,7 +19,10 @@ from pdf_parser import extract_text_from_pdf
 from push_invoice import InvoiceDraft, InvoiceLine, QuickbooksInvoiceService
 from attachments import fetch_messages_with_attachments
 import time
-
+from add_attachments import upload_file
+from quickbooks.objects.attachable import Attachable
+from quickbooks.objects.base import AttachableRef
+from quickbooks.objects.vendor import Vendor
 # If modifying these scopes, delete the file token.json.
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -204,6 +208,7 @@ def main():
         print(f"quickbooks error '{e.message}'(code:'{e.error_code}'")
         print(f"quickbooks detail:'{e.detail}'")
         return
+
     project_root = Path(__file__).parent.parent
     download_dir = project_root / "attachments"
     download_dir.mkdir(exist_ok=True)
@@ -225,6 +230,10 @@ def main():
             for filename, data in attachments:
                 
                 print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")
+                               
+
+
+
                 if isinstance(data, str):  # PDF text already extracted
                     print(f"[{idx}/{len(messages)}] {message_id}: processing PDF {filename}")
                     pdf_draft = build_invoice_draft(message_text=data, client=openai_client)
@@ -239,12 +248,30 @@ def main():
             # If we have a valid draft, push to QuickBooks
             if draft:
                 print(f"[{idx}/{len(messages)}] {message_id}: line items:")
-                #delete this line service = QuickbooksInvoiceService()
+                bill=qb_service.push_invoice(draft)
                 
-                ####TAKE A LOOK AT THIS 
-                qb_service.push_invoice(draft)
-                for line in draft.line_items:
-                    print("   ", line.model_dump())
+                
+
+                               
+                if attachments:
+                    vendor = Vendor.all(max_results=1, qb=qb_service.qb_client)[0]
+                    attachable= Attachable()
+                    attachable_ref = AttachableRef()
+                    attachable_ref.EntityRef = vendor.to_ref()
+                    attachable.AttachableRef.append(attachable_ref)
+                    base_dir = "/home/dan/Projects/Ai-Invoice/attachments"
+                    
+                    attachable.Note = "Sample note"
+                    attachable.FileName = filename
+                    attachable._FilePath =  os.path.join(base_dir, filename)
+                    attachable.ContentType = 'text/plain'
+
+                    attachable.save(qb=qb_service.qb_client)
+                    print(f"success{filename}")
+
+
+                    for line in draft.line_items:
+                        print("   ", line.model_dump())
 
                 # Calculate and verify total
                 calculated_total = draft.total_amount
@@ -255,15 +282,8 @@ def main():
                 else:
                     draft.total_amount = calculated_total
                     print(draft.total_amount)
-                # Push to QuickBooks
-                invoice = qb_service.push_invoice(draft)
-                invoice_id = getattr(invoice, "Id", None)
-                if invoice_id:
-                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id})")
-                else:
-                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created")
-            else:
-                print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
+                
+                
 
 
 if __name__ == "__main__":
