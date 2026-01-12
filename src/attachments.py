@@ -100,7 +100,7 @@ def get_or_create_label(service, label_name):
 
 
 #get the message and its attachment if provided
-def fetch_messages_with_attachments(max_results: int = 1, query: Optional[str] = None):
+def fetch_messages_with_attachments(max_results: int = 10, query: Optional[str] = None):
     # Get project root directory for attachments
     project_root = Path(__file__).parent.parent
     attachments_dir = project_root / "attachments"
@@ -166,7 +166,7 @@ def fetch_messages_with_attachments(max_results: int = 1, query: Optional[str] =
                 else:
                     attachments.append((filename, binary_data))
                 continue
-
+        
 
             attachment_id = part_body.get("attachmentId")
             if filename and attachment_id:
@@ -199,14 +199,13 @@ class LabelSort(BaseModel):
 
 
 def ai_invoice(message_text: str,attachments:list = None, client: Optional[OpenAI] = None):
-     context= message_text
-     print(attachments)
+     context= message_text 
      if attachments:
          context +="\n\nAttachments found:\n"
          print(context)
          for filename, data in attachments:
              context += f"- {filename}\n"
-     response = client.responses.parse(
+     response = client.responses.create(
         model="gpt-4o-2024-08-06",
          input=[
         {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If it is an email return: invoice and if not return: none."},
@@ -229,24 +228,26 @@ def main():
     download_dir = project_root / "attachments"
     download_dir.mkdir(exist_ok=True)
     openai_client = OpenAI()
-
+    
     # Iterate through the generator
-    for message_id, subject, message_text, attachments in fetch_messages_with_attachments(max_results=1):
+    for message_id, subject, message_text, attachments in fetch_messages_with_attachments(max_results=10):
         print(f"\n--- Message ID: {message_id} ---")
         print(f"Subject: {subject}")
         print(f"Message Text: {message_text[:100]}...")  # First 100 chars
-
+      
         # Check attachments
         if attachments:
             print(f"Found {len(attachments)} attachment(s)")
+          
             for filename, data in attachments:
+                print(filename)
                 print(f"  - {filename}")
                 if isinstance(data, str):  # PDF text
                     print(f"    Text preview: {data[:100]}...")
                 else:  # Binary data
                     print(f"    Binary data: {len(data)} bytes")
 
-
+            
 
         # Optional: Call AI to classify
         label = ai_invoice(message_text, attachments, client=openai_client)

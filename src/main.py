@@ -18,6 +18,9 @@ from pdf_parser import extract_text_from_pdf
 from push_invoice import InvoiceDraft, InvoiceLine, QuickbooksInvoiceService
 from attachments import fetch_messages_with_attachments
 import time
+from attachments import fetch_messages_with_attachments
+import glob
+import os
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = [
@@ -104,24 +107,25 @@ class LabelSort(BaseModel):
 
 
 
-
-
-
 #function for using open ai to classifiy emails as either invoice or not
-def ai_invoice(message_text: str, attachments: list = None, client: Optional[OpenAI] = None):
-     if client is None:
+
+
+def invoice_label(message_text: str, attachments: list , client: Optional[OpenAI] = None):
+    if client is None:
          client = OpenAI()
 
-     context= message_text
+    context= message_text
 
-     if attachments:
-         context +="\n\nAttachments found:\n"
-         for filename, data in attachments:
-             context += f"- {filename}\n"
-     response = client.responses.parse(
+    if attachments:
+        context +="\n\nAttachments found:\n"
+        for filename, data in attachments:
+            context += f"- {filename}\n"
+        print(context)
+     
+    response = client.responses.parse(
         model="gpt-4o-2024-08-06",
-         input=[
-        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not.If there is an attachment, it is likely an invoice. If it is an email return: invoice and if not return: none."},
+        input=[
+        {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If there is an attachment, it is likely an invoice. If it is an email return: invoice and if not return: none."},
         {
             "role": "user",
             "content": context,
@@ -131,9 +135,63 @@ def ai_invoice(message_text: str, attachments: list = None, client: Optional[Ope
     )
 
 
-     return response.output_parsed.label
+    return response.output_parsed.label
 
 
+
+
+
+def ai_invoice(message_text: str, attachments: list = None, client: Optional[OpenAI] = None):
+    client = OpenAI()
+    
+       
+
+    project_root = Path(__file__).parent.parent
+    attachments_dir = project_root / "attachments"
+       
+    if attachments :
+       
+            file = attachments[0]
+            filename = file[0]   
+            temp_path = attachments_dir / filename 
+        
+            list_of_files = glob.glob(f"{attachments_dir}/*")
+           
+            latest_file= max(list_of_files, key=os.path.getctime)
+             
+          
+            print(latest_file)           
+
+
+            file = client. files.create(
+                file = open(latest_file, "rb"),
+                purpose = "user_data"
+            )
+            
+                       
+            
+            response =  client.responses.create(
+                model="gpt-4o-2024-08-06",
+                input=[
+                    {
+                        "role":"user",
+                        "content":[
+                            {
+                                "type":"input_file",
+                                "file_id": file.id,
+                            },
+                            {
+                                "type": "input_text",
+                                "text": "parse this invoice",
+
+                            },
+                        ]
+                    }
+                ]
+
+            )
+            event = response.output_text
+            return event
 
 def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, attachments:list=None) -> Optional[InvoiceDraft]:
     if client is None:
@@ -145,6 +203,7 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
         context +="\n\nAttachments found:\n"
         for filename, data in attachments:
             context += f"-{filename}\n"
+        print(context)
 
     response = client.responses.parse(
         model="gpt-4o-2024-08-06",
@@ -163,10 +222,10 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
         text_format=InvoiceDraft,
     )
     payload = response.output_parsed
-    #print(f"Payload: {payload}")
-    #if payload:
-     #   print(f"Items: {payload.line_items}")
-      #  print(f"Vendor: {payload.vendor_display_name}")
+    print(f"Payload: {payload}")
+    if payload:
+        print(f"Items: {payload.line_items}")
+        print(f"Vendor: {payload.vendor_display_name}")
 
 
     if not payload or not payload.line_items:
@@ -211,23 +270,28 @@ def main():
     openai_client = OpenAI()
     messages = list(fetch_messages_with_attachments(max_results=10))
     
+    
     # Process messages
     for idx, (message_id, subject, message_text, attachments) in enumerate(messages, start=1):
         draft=None
-        label = ai_invoice(message_text, attachments, client=openai_client)
+        label = invoice_label(message_text, attachments, client=openai_client)
         print(f"[{idx}/{len(messages)}] {message_id}: subject -> {subject} label -> {label}")
+        print(attachments)
 
-        if label == "invoice":
+        if label== "invoice":
+            print("starting ai_invoice process")
             
-            draft = build_invoice_draft(message_text=message_text,client=openai_client)
+            draft = ai_invoice(message_text=message_text, attachments=attachments,client=openai_client)
             print(draft)
             # If we have PDF attachments, try to extract invoice from them
-            for filename, data in attachments:
-                
+           
+
+        for filename, data in attachments:
+
                 print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")
                 if isinstance(data, str):  # PDF text already extracted
                     print(f"[{idx}/{len(messages)}] {message_id}: processing PDF {filename}")
-                    pdf_draft = build_invoice_draft(message_text=data, client=openai_client)
+                    pdf_draft = ai_invoice(message_text=data, client=openai_client)
                     if pdf_draft and pdf_draft.line_items:
                         draft = pdf_draft
                         break
@@ -236,34 +300,34 @@ def main():
                     target.write_bytes(data)
                     print(f"[{idx}/{len(messages)}] {message_id}: saved attachment {filename}")
 
-            # If we have a valid draft, push to QuickBooks
-            if draft:
-                print(f"[{idx}/{len(messages)}] {message_id}: line items:")
-                #delete this line service = QuickbooksInvoiceService()
-                
-                ####TAKE A LOOK AT THIS 
-                qb_service.push_invoice(draft)
-                for line in draft.line_items:
-                    print("   ", line.model_dump())
+        # If we have a valid draft, push to QuickBooks
+        if draft:
+            print(f"[{idx}/{len(messages)}] {message_id}: line items:")
+            #delete this line service = QuickbooksInvoiceService()
 
-                # Calculate and verify total
-                calculated_total = draft.total_amount
-                #sum(line.amount for line in draft.line_items)+tax
-                if draft.total_amount is not None:
-                    if abs(draft.total_amount - calculated_total) > 0.01:
-                        print(f"[{idx}/{len(messages)}] {message_id}: total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
-                else:
-                    draft.total_amount = calculated_total
-                    print(draft.total_amount)
-                # Push to QuickBooks
-                invoice = qb_service.push_invoice(draft)
-                invoice_id = getattr(invoice, "Id", None)
-                if invoice_id:
-                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id})")
-                else:
-                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created")
+            ####TAKE A LOOK AT THIS
+            qb_service.push_invoice(draft)
+            for line in draft.line_items:
+                print("   ", line.model_dump())
+
+            # Calculate and verify total
+            calculated_total = draft.total_amount.astype(float)
+            #sum(line.amount for line in draft.line_items)+tax
+            if draft.total_amount is not None:
+                if abs(draft.total_amount - calculated_total) > 0.01:
+                    print(f"[{idx}/{len(messages)}] {message_id}: total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
             else:
-                print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
+                draft.total_amount = calculated_total
+                print(draft.total_amount)
+            # Push to QuickBooks
+            invoice = qb_service.push_invoice(draft)
+            invoice_id = getattr(invoice, "Id", None)
+            if invoice_id:
+                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id})")
+            else:
+                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created")
+        else:
+            print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
 
 
 if __name__ == "__main__":

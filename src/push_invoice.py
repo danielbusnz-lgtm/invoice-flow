@@ -40,13 +40,13 @@ class QuickbooksInvoiceService:
         self.auth_client = AuthClient(
             client_id=os.getenv('CLIENT_ID'),
             client_secret=os.getenv('CLIENT_SECRET'),
-            environment='production',
-            redirect_uri='https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl',
+            environment=os.getenv('ENVIRONMENT'),
+            redirect_uri=os.getenv('REDIRECT_URI'),
         )
 
         self.qb_client = QuickBooks(
             auth_client=self.auth_client,
-            refresh_token=os.getenv('QB_REFRESH_TOKEN'),
+            refresh_token=os.getenv('REFRESH_TOKEN'),
             company_id=os.getenv('QB_REALM_ID'),
 	    )
 
