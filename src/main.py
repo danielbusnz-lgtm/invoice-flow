@@ -29,8 +29,8 @@ from quickbooks.exceptions import QuickbooksException
 
 # Local imports
 from pdf_parser import extract_text_from_pdf
-from push_invoice import InvoiceDraft, InvoiceLine, QuickbooksInvoiceService
-from attachments import fetch_messages_with_attachments
+from quickbooks_service import InvoiceDraft, InvoiceLine, QuickbooksInvoiceService
+from gmail import fetch_messages_with_attachments
 
 
 # Configuration
