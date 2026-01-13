@@ -22,6 +22,9 @@ CLIENT_SECRET
 token.json
 credentials.json
 
+# Downloaded attachments
+attachments/
+
 # IDE
 .vscode/
 .idea/
