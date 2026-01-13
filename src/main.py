@@ -1,28 +1,43 @@
-from quickbooks.exceptions import QuickbooksException
+# Standard library imports
+import os
 import os.path
-from enum import Enum
-from pydantic import BaseModel
 import base64
+import time
+import glob
+import tempfile
+from enum import Enum
+from pathlib import Path
+from typing import List, Literal, Optional
+import datetime
+# Third-party imports
+import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel
 from openai import OpenAI
-import os
-from typing import List, Literal, Optional
+from dotenv import load_dotenv
+from pdf2image import convert_from_path, convert_from_bytes
+
+# Google API imports
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from pathlib import Path
+
+# QuickBooks imports
+from quickbooks.exceptions import QuickbooksException
+
+# Local imports
 from pdf_parser import extract_text_from_pdf
 from push_invoice import InvoiceDraft, InvoiceLine, QuickbooksInvoiceService
 from attachments import fetch_messages_with_attachments
-import time
-from attachments import fetch_messages_with_attachments
-import glob
-import os
 
-# If modifying these scopes, delete the file token.json.
+
+# Configuration
+project_root = Path(__file__).parent.parent
+load_dotenv(project_root / ".env")
+refresh_token = os.getenv('REFRESH_TOKEN')
+
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.labels",
@@ -30,87 +45,89 @@ SCOPES = [
 ]
 
 
-def load_creds():
-  # Get project root directory (parent of src/)
-  project_root = Path(__file__).parent.parent
-  token_path = project_root / "token.json"
-  credentials_path = project_root / "credentials.json"
-
-  creds = None
-  # The file token.json stores the user's access and refresh tokens, and is
-  # created automatically when the authorization flow completes for the first
-  # time.
-  if token_path.exists():
-    creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-  # If there are no (valid) credentials available, let the user log in.
-  if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-      creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-          str(credentials_path), SCOPES
-        )
-        creds = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open(token_path, "w") as token:
-      token.write(creds.to_json())
-  return creds
-service = build("gmail", "v1", credentials=load_creds())
-
-
-#decode the emails using utf-8
-def decode_data(encoded):
-      if not encoded:
-          return None
-      padded = encoded + "=" * (-len(encoded) % 4)
-      return base64.urlsafe_b64decode(padded).decode("utf-8")
-
-
-def decode_bytes(encoded: str) -> bytes:
-      if not encoded:
-          return b""
-      padded = encoded + "=" * (-len(encoded) % 4)
-      return base64.urlsafe_b64decode(padded)
-
-
-
-
-#make sure there is a proper label
-def get_or_create_label(service, label_name):
-      """Get label ID by name, or create if it doesn't exist"""
-      # List all labels
-      results = service.users().labels().list(userId='me').execute()
-      labels = results.get('labels', [])
-
-      # Check if label exists
-      for label in labels:
-          if label['name'].lower() == label_name.lower():
-              return label['id']
-
-      # Create label if it doesn't exist
-      label_object = {
-          'name': label_name,
-          'labelListVisibility': 'labelShow',
-          'messageListVisibility': 'show'
-      }
-      created_label = service.users().labels().create(
-          userId='me',
-          body=label_object
-      ).execute()
-
-      return created_label['id']
-
-
-#structured output class
+# Pydantic Models
 class LabelSort(BaseModel):
     label: Literal["invoice", "none"]
 
 
+class InvoiceData(BaseModel):
+    vendor_display_name: str
+    memo: Optional[str] = None
+    line_items: List[InvoiceLine]
+    tax: Optional[float] = None
+    total_amount: Optional[float] = None
+    due_date: Optional[str] = None
+    invoice_number: Optional[str] = None
+    invoice_date: Optional[str] = None
 
-#function for using open ai to classifiy emails as either invoice or not
+
+# Gmail Authentication
+def load_creds():
+    project_root = Path(__file__).parent.parent
+    token_path = project_root / "token.json"
+    credentials_path = project_root / "credentials.json"
+
+    creds = None
+    if token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(credentials_path), SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+
+        with open(token_path, "w") as token:
+            token.write(creds.to_json())
+
+    return creds
+
+service = build("gmail", "v1", credentials=load_creds())
 
 
+# Email Decoding Functions
+def decode_data(encoded):
+    if not encoded:
+        return None
+    padded = encoded + "=" * (-len(encoded) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8")
+
+
+def decode_bytes(encoded: str) -> bytes:
+    if not encoded:
+        return b""
+    padded = encoded + "=" * (-len(encoded) % 4)
+    return base64.urlsafe_b64decode(padded)
+
+
+# Gmail Label Management
+def get_or_create_label(service, label_name):
+    results = service.users().labels().list(userId='me').execute()
+    labels = results.get('labels', [])
+
+    for label in labels:
+        if label['name'].lower() == label_name.lower():
+            return label['id']
+
+    label_object = {
+        'name': label_name,
+        'labelListVisibility': 'labelShow',
+        'messageListVisibility': 'show'
+    }
+    created_label = service.users().labels().create(
+        userId='me',
+        body=label_object
+    ).execute()
+
+    return created_label['id']
+
+
+# AI Invoice Processing Functions
 def invoice_label(message_text: str, attachments: list , client: Optional[OpenAI] = None):
+    """Classify email as invoice or not using OpenAI"""
     if client is None:
          client = OpenAI()
 
@@ -120,8 +137,8 @@ def invoice_label(message_text: str, attachments: list , client: Optional[OpenAI
         context +="\n\nAttachments found:\n"
         for filename, data in attachments:
             context += f"- {filename}\n"
-        print(context)
-     
+        
+
     response = client.responses.parse(
         model="gpt-4o-2024-08-06",
         input=[
@@ -131,95 +148,144 @@ def invoice_label(message_text: str, attachments: list , client: Optional[OpenAI
             "content": context,
         },
     ],
-        text_format=LabelSort,  # your structured output class
+        text_format=LabelSort,
     )
-
 
     return response.output_parsed.label
 
 
+def pdf_invoice(message_text: str, text , client: Optional[OpenAI] = None):
+    """Extract invoice data from PDF text"""
+    if client is None:
+         client = OpenAI()
+
+    response = client.responses.parse(
+        model="gpt-5",
+        input=[
+        {"role": "system", "content":
+            "Extract structured invoice data from this document. "
+            "REQUIRED: vendor_display_name, line_items (with item, rate, quantity), total_amount. "
+            "OPTIONAL: invoice_number, invoice_date (format: MM/DD/YYYY), due_date (format: MM/DD/YYYY), tax, memo. "
+            "Return all dates in MM/DD/YYYY format."},
+        {
+            "role": "user",
+            "content": text,
+        },
+    ],
+        text_format=InvoiceData,
+    )
+
+    payload = response.output_parsed
+
+    line_items = [
+        InvoiceLine(
+            item=item.item,
+            rate=item.rate,
+            quantity=item.quantity,
+            description=item.description,
+        )
+        for item in payload.line_items
+    ]
+
+    return InvoiceDraft(
+        vendor_display_name=payload.vendor_display_name,
+        memo=payload.memo,
+        line_items=line_items,
+        tax=payload.tax,
+        total_amount=payload.total_amount,
+        due_date=payload.due_date,
+        invoice_number=payload.invoice_number,
+        invoice_date=payload.invoice_date,
+    )
 
 
-
-def ai_invoice(message_text: str, attachments: list = None, client: Optional[OpenAI] = None):
+def ai_invoice(message_text: str, file_path: None, client: Optional[OpenAI] = None)-> Optional[InvoiceDraft]:
+    """Extract invoice data from image using OpenAI vision API"""
     client = OpenAI()
-    
-       
 
-    project_root = Path(__file__).parent.parent
-    attachments_dir = project_root / "attachments"
-       
-    if attachments :
-       
-            file = attachments[0]
-            filename = file[0]   
-            temp_path = attachments_dir / filename 
-        
-            list_of_files = glob.glob(f"{attachments_dir}/*")
-           
-            latest_file= max(list_of_files, key=os.path.getctime)
-             
-          
-            print(latest_file)           
+    def create_file(file_path):
+        with open(file_path, "rb") as file_content:
+            result = client.files.create(
+            file=file_content,
+            purpose="vision",
+        )
+        return result.id
 
+    file_id = create_file(file_path)
 
-            file = client. files.create(
-                file = open(latest_file, "rb"),
-                purpose = "user_data"
-            )
-            
-                       
-            
-            response =  client.responses.create(
-                model="gpt-4o-2024-08-06",
-                input=[
+    response =  client.responses.parse(
+        model="gpt-5",
+        input=[{
+            "role":"user",
+            "content":[
                     {
-                        "role":"user",
-                        "content":[
-                            {
-                                "type":"input_file",
-                                "file_id": file.id,
-                            },
-                            {
-                                "type": "input_text",
-                                "text": "parse this invoice",
+                        "type":"input_text", "text"  : "Extract structured invoice data from this image. REQUIRED: vendor_display_name, line_items (with item, rate, quantity), total_amount. OPTIONAL: invoice_number, invoice_date, due_date, tax, memo. Return all dates in MM/DD/YYYY format."},
+                    {
+                        "type": "input_image",
+                        "file_id": file_id,
 
-                            },
-                        ]
-                    }
-                ]
+                    },
+                ],
+            }],
+             text_format=InvoiceData,
+    )
+    payload = response.output_parsed
 
-            )
-            event = response.output_text
-            return event
+    print(payload)
+
+    line_items = [
+        InvoiceLine(
+            item=item.item,
+            rate=item.rate,
+            quantity=item.quantity,
+            description=item.description,
+        )
+        for item in payload.line_items
+    ]
+    return InvoiceDraft(
+        vendor_display_name=payload.vendor_display_name,
+        memo=payload.memo,
+        line_items=line_items,
+        tax=payload.tax,
+        total_amount=payload.total_amount,
+        due_date=payload.due_date,
+        invoice_number=payload.invoice_number,
+        invoice_date=payload.invoice_date,
+    )
+
 
 def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, attachments:list=None) -> Optional[InvoiceDraft]:
+    """Build invoice draft from email text"""
     if client is None:
         client = OpenAI()
 
     context= message_text
     if attachments:
         print("has attachments")
-        context +="\n\nAttachments found:\n"
+        context +="\qun\nAttachments found:\n"
         for filename, data in attachments:
             context += f"-{filename}\n"
         print(context)
 
     response = client.responses.parse(
-        model="gpt-4o-2024-08-06",
+        model="gpt-5",
         input=[
             {
                 "role": "system",
                 "content": (
-                    "Extract structured invoice data from the email. "
-                    "Always respond with JSON matching the schema. "
-                    "If you do not find invoice information, return an empty items list."
-                    "Our company name is Cape Property Pros, and we are always the reciever of the invoice"
+                    "Extract structured invoice data from this email. "
+                    "REQUIRED: vendor_display_name, line_items (with item, rate, quantity), total_amount. "
+                    "OPTIONAL: invoice_number, invoice_date, due_date, tax, memo. "
+                    "Return all dates in MM/DD/YYYY format. "
+                    "NOTE: Our company is Cape Property Pros (the receiver). "
+                    "If no invoice data found, return empty line_items list."
                 ),
             },
             {"role": "user", "content": context},
         ],
-        text_format=InvoiceDraft,
+        text_format=InvoiceData
+
+
     )
     payload = response.output_parsed
     print(f"Payload: {payload}")
@@ -250,9 +316,13 @@ def build_invoice_draft(message_text: str, client: Optional[OpenAI] = None, atta
         line_items=line_items,
         tax=payload.tax,
         total_amount=payload.total_amount,
+        due_date=payload.due_date,
+        invoice_number=payload.invoice_number,
+        invoice_date=payload.invoice_date,
     )
 
 
+# Main Processing Function
 def main():
     try:
         creds = load_creds()
@@ -263,62 +333,77 @@ def main():
         print(f"quickbooks error '{e.message}'(code:'{e.error_code}'")
         print(f"quickbooks detail:'{e.detail}'")
         return
+
     project_root = Path(__file__).parent.parent
     download_dir = project_root / "attachments"
     download_dir.mkdir(exist_ok=True)
     qb_service = QuickbooksInvoiceService()
     openai_client = OpenAI()
     messages = list(fetch_messages_with_attachments(max_results=10))
-    
-    
-    # Process messages
+
+    # Process each message
     for idx, (message_id, subject, message_text, attachments) in enumerate(messages, start=1):
         draft=None
         label = invoice_label(message_text, attachments, client=openai_client)
         print(f"[{idx}/{len(messages)}] {message_id}: subject -> {subject} label -> {label}")
-        print(attachments)
+        
 
-        if label== "invoice":
+        project_root = Path(__file__).parent.parent
+        attachments_dir = project_root / "attachments"
+
+        # Get the actual attachment file for this email
+        latest_file = None
+        if attachments:
+            attachment_filename = attachments[0][0]
+            latest_file = str(attachments_dir / attachment_filename)
+
+        if label== "invoice" and latest_file:
             print("starting ai_invoice process")
-            
-            draft = ai_invoice(message_text=message_text, attachments=attachments,client=openai_client)
-            print(draft)
-            # If we have PDF attachments, try to extract invoice from them
-           
+            draft = None
 
-        for filename, data in attachments:
+            if latest_file.lower().endswith('.pdf'):
+                path = Path(latest_file)
+                text = extract_text_from_pdf(path)
 
-                print(f"Attachment: {filename}, Type: {type(data).__name__}, IsString: {isinstance(data, str)}")
-                if isinstance(data, str):  # PDF text already extracted
-                    print(f"[{idx}/{len(messages)}] {message_id}: processing PDF {filename}")
-                    pdf_draft = ai_invoice(message_text=data, client=openai_client)
-                    if pdf_draft and pdf_draft.line_items:
-                        draft = pdf_draft
-                        break
-                else:  # Binary attachment (non-PDF)
-                    target = download_dir / filename
-                    target.write_bytes(data)
-                    print(f"[{idx}/{len(messages)}] {message_id}: saved attachment {filename}")
+                if text is None or len(text.strip()) < 10:
+                    # Image-based PDF - convert to images
+                    print("PDF is image-based, converting to images")
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        images_from_path = convert_from_path(latest_file, output_folder=temp_dir, fmt='jpg')
 
-        # If we have a valid draft, push to QuickBooks
+                        image_files = glob.glob(f"{temp_dir}/*.jpg")
+                        first_image = image_files[0] if image_files else None
+
+                        if first_image:
+                            print("Processing as image")
+                            draft = ai_invoice(message_text, file_path=first_image, client=openai_client)
+                else:
+                    # Text-based PDF
+                    print("PDF has extractable text")
+                    draft = pdf_invoice(message_text, text=text, client=openai_client)
+
+            elif latest_file.endswith(('.jpeg', '.jpg', '.png')):
+                print('THIS IS A JPEG')
+                draft = ai_invoice(message_text=message_text, file_path=latest_file, client=openai_client)
+
+            print(f"Draft result: {draft}")
+
+        # Push to QuickBooks if valid draft
         if draft:
             print(f"[{idx}/{len(messages)}] {message_id}: line items:")
-            #delete this line service = QuickbooksInvoiceService()
 
-            ####TAKE A LOOK AT THIS
-            qb_service.push_invoice(draft)
             for line in draft.line_items:
                 print("   ", line.model_dump())
 
-            # Calculate and verify total
-            calculated_total = draft.total_amount.astype(float)
-            #sum(line.amount for line in draft.line_items)+tax
+            # Verify total
+            calculated_total = draft.total_amount
             if draft.total_amount is not None:
                 if abs(draft.total_amount - calculated_total) > 0.01:
                     print(f"[{idx}/{len(messages)}] {message_id}: total mismatch (draft={draft.total_amount}, calculated={calculated_total})")
             else:
                 draft.total_amount = calculated_total
                 print(draft.total_amount)
+
             # Push to QuickBooks
             invoice = qb_service.push_invoice(draft)
             invoice_id = getattr(invoice, "Id", None)
@@ -332,6 +417,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

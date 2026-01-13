@@ -157,7 +157,8 @@ def fetch_messages_with_attachments(max_results: int = 10, query: Optional[str] 
             inline_data = part_body.get("data")
             if filename and inline_data:
                 binary_data = decode_bytes(inline_data)
-                if filename.lower().endswith('.pdf'):
+                
+                if filename.endswith('.pdf'):
                     temp_path = attachments_dir / filename
                     temp_path.parent.mkdir(exist_ok=True)
                     temp_path.write_bytes(binary_data)
