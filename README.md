@@ -34,8 +34,8 @@ brew install poppler
 ### 2. Clone and setup
 
 ```bash
-git clone https://github.com/danielbusnz-lgtm/Ai-Invoice.git
-cd Ai-Invoice
+git clone https://github.com/danielbusnz-lgtm/invoice-flow.git
+cd invoice-flow
 pip install -r requirements.txt
 ```
 
@@ -90,13 +90,12 @@ The script will:
 ## Project Structure
 
 ```
-Ai-Invoice/
+invoice-flow/
 ├── src/
 │   ├── main.py              # Main application logic
-│   ├── attachments.py       # Gmail attachment fetching
+│   ├── gmail.py             # Gmail attachment fetching
 │   ├── pdf_parser.py        # PDF text extraction
-│   ├── push_invoice.py      # QuickBooks bill creation
-│   └── transactions.py      # Bank transaction utilities
+│   └── quickbooks_service.py # QuickBooks bill creation
 ├── attachments/             # Downloaded invoice files (gitignored)
 ├── credentials.json         # Gmail OAuth credentials (gitignored)
 ├── token.json              # Gmail access token (gitignored)
