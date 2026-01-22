@@ -50,3 +50,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.5.0
+pandas==2.3.3
+pdf2image==1.17.0
+flask==3.1.0
