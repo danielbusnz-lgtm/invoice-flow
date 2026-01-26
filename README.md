@@ -4,21 +4,35 @@ Automated invoice processing system that extracts invoice data from Gmail attach
 
 ## Features
 
-• **Smart Email Classification** - Automatically identifies invoice emails using AI
-• **Dual PDF Processing** - Handles both text-based PDFs and image-based (scanned) PDFs with intelligent format detection
-• **Multi-format Support** - Processes PDF, JPEG, PNG, and JPG attachments
-• **AI Data Extraction** - Uses OpenAI GPT-4 Vision to extract structured invoice data from documents
-• **Intelligent Customer Matching** - AI-powered customer matching with address-based fallback and fuzzy matching
-• **Receipt vs Invoice Detection** - Automatically distinguishes between unpaid invoices and already-paid receipts
-• **Automatic Vendor Management** - Creates new vendors if not found, with fuzzy name matching
-• **Category to Account Mapping** - Intelligently maps expense categories to QuickBooks expense accounts
-• **Duplicate Prevention** - Checks for existing bills by invoice number, vendor, date, and amount
-• **File Attachment** - Automatically attaches invoice files to QuickBooks transactions
-• **QuickBooks Integration** - Creates Bills (unpaid) or Purchases (already-paid) with line items, tax, and customer/vendor assignments
-• **Invoice Tracking** - Captures invoice numbers, dates, due dates, and vendor information
-• **Gmail Automation** - Fetches unprocessed emails and labels them after processing
-• **Environment Management** - Automatic refresh token updates to .env file
-• **Sandbox/Production Support** - Seamless switching between QuickBooks sandbox and production environments
+### Core Processing
+**Intelligent Email Classification** - AI-powered detection of invoice emails based on content, attachments, and context
+
+**Format-Agnostic PDF Processing** - Automatically detects and handles text-based PDFs, scanned PDFs, and image files (JPEG, PNG, JPG)
+
+**AI-Powered Data Extraction** - GPT-4 Vision extracts vendor, invoice number, dates, line items, tax, and total from any document format
+
+### Smart Matching & Deduplication
+**Intelligent Customer Matching** - AI-powered customer identification with address-based fallback and fuzzy name matching
+
+**Automatic Vendor Management** - Fuzzy vendor matching with auto-creation for new vendors
+
+**Duplicate Prevention** - Multi-level detection by invoice number, vendor, date, and amount to prevent duplicate entries
+
+### QuickBooks Operations
+**Invoice vs Receipt Detection** - Automatically routes unpaid invoices to Bills and already-paid expenses to Purchases
+
+**Expense Category Mapping** - Intelligent mapping of extracted categories to QuickBooks expense accounts (materials, labor, equipment, fuel, permits, supplies, utilities, etc.)
+
+**Transaction Creation** - Creates fully-formed Bill or Purchase transactions with line items, tax, customer assignments, and vendor references
+
+**File Attachments** - Automatically attaches original invoice files to QuickBooks transactions with proper MIME typing
+
+### Automation & Integration
+**Gmail Integration** - Fetches unprocessed emails, extracts attachments, and labels processed messages
+
+**Token Management** - Automatic OAuth token refresh with .env persistence
+
+**Sandbox/Production Support** - Seamless environment switching for testing and production workflows
 
 ## Prerequisites
 
