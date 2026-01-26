@@ -92,15 +92,38 @@ The script will:
 ```
 invoice-flow/
 ├── src/
-│   ├── main.py              # Main application logic
-│   ├── gmail.py             # Gmail attachment fetching
-│   ├── pdf_parser.py        # PDF text extraction
-│   └── quickbooks_service.py # QuickBooks bill creation
-├── attachments/             # Downloaded invoice files (gitignored)
-├── credentials.json         # Gmail OAuth credentials (gitignored)
-├── token.json              # Gmail access token (gitignored)
-├── .env                    # Environment variables (gitignored)
-└── requirements.txt        # Python dependencies
+│   ├── main.py                      # Main application entry point
+│   ├── api/                         # API endpoints
+│   ├── models/
+│   │   └── invoice.py               # Invoice data model
+│   ├── parsers/
+│   │   ├── pdf_parser.py            # PDF text extraction
+│   │   └── ai_parser.py             # AI-powered data extraction
+│   ├── services/
+│   │   ├── gmail_service.py         # Gmail API integration
+│   │   └── quickbooks_service.py    # QuickBooks API integration
+│   └── utils/
+│       └── auth.py                  # Authentication utilities
+├── tests/
+│   ├── test_bill_creation.py        # Bill creation tests
+│   ├── test_customer_matching.py    # Customer matching tests
+│   ├── test_vendor_management.py    # Vendor management tests
+│   ├── test_duplicate_detection.py  # Duplicate detection tests
+│   ├── test_receipt_creation.py     # Receipt creation tests
+│   ├── test_category_mapping.py     # Category mapping tests
+│   ├── test_attachments.py          # Attachment handling tests
+│   └── run_all_tests.sh             # Test runner script
+├── scripts/
+│   ├── refresh_token.py             # Token refresh utility
+│   ├── get_accounts.py              # Account retrieval utility
+│   ├── duplicates.py                # Duplicate detection script
+│   └── test_receipt.py              # Receipt testing utility
+├── attachments/                     # Downloaded invoice files (gitignored)
+├── credentials.json                 # Gmail OAuth credentials (gitignored)
+├── token.json                       # Gmail access token (gitignored)
+├── .env                             # Environment variables (gitignored)
+├── requirements.txt                 # Python dependencies
+└── README.md                        # This file
 ```
 
 ## How It Works

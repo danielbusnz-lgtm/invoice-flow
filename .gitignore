@@ -34,8 +34,9 @@ attachments/
 # OS
 .DS_Store
 Thumbs.db
-qb_service/myenv/
-qb_service/myenv/
-qb_service/myenv/
+
+# System directories
+.claude-flow/
+.swarm/
 
 

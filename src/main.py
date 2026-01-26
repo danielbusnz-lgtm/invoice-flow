@@ -59,6 +59,7 @@ def main():
             latest_file = str(attachments_dir / attachment_filename)
 
 
+
         if label == "invoice" and latest_file:
             print("starting ai_invoice process")
             draft = None
@@ -92,11 +93,6 @@ def main():
 
         # Push to QuickBooks if valid draft
         if draft:
-            # Check if it's a receipt
-            if hasattr(draft, 'is_receipt') and draft.is_receipt:
-                print(f"[{idx}/{len(messages)}] {message_id}: RECEIPT detected - skipping (already paid)")
-                continue
-
             print(f"[{idx}/{len(messages)}] {message_id}: line items:")
 
             for line in draft.line_items:
@@ -111,13 +107,25 @@ def main():
                 draft.total_amount = calculated_total
                 print(draft.total_amount)
 
-            # Push to QuickBooks
-            invoice = qb_service.push_invoice(draft)
-            invoice_id = getattr(invoice, "Id", None)
-            if invoice_id:
-                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created (Id={invoice_id})")
+            # Route to correct QuickBooks transaction type
+            if hasattr(draft, 'is_receipt') and draft.is_receipt:
+                # Receipt (already paid) → Create Purchase
+                print(f"[{idx}/{len(messages)}] {message_id}: RECEIPT detected - creating Purchase (already paid)")
+                transaction = qb_service.push_receipt(draft)
             else:
-                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks invoice created")
+                # Invoice (unpaid) → Create Bill
+                transaction = qb_service.push_invoice(draft)
+
+            # Attach the file
+            if latest_file:
+                print(f"Attaching file: {latest_file}")
+                attach = qb_service.add_attachment(latest_file, transaction)
+
+            transaction_id = getattr(transaction, "Id", None)
+            if transaction_id:
+                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created (Id={transaction_id})")
+            else:
+                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created")
         else:
             print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
 

@@ -1,4 +1,5 @@
 # QuickBooks objects
+from quickbooks.objects.attachable import Attachable, AttachableRef
 from quickbooks.objects.customer import Customer
 from quickbooks.objects.vendor import Vendor
 from quickbooks.objects.bill import Bill
@@ -41,13 +42,47 @@ class QuickbooksInvoiceService:
                 environment = environment,
                 redirect_uri=os.getenv('REDIRECT_URI'),
             )
- 
+
 
             self.qb_client = QuickBooks(
                 auth_client=self.auth_client,
                 refresh_token=os.getenv('REFRESH_TOKEN'),
                 company_id=os.getenv('QB_REALM_ID'),
 	        )
+
+            # Save new refresh token after initialization
+            self._save_refresh_token()
+
+    def _save_refresh_token(self):
+        """Save the new refresh token to .env file"""
+        new_refresh_token = self.auth_client.refresh_token
+
+        if not new_refresh_token:
+            return
+
+        # Read current .env file
+        from pathlib import Path
+        env_path = Path(__file__).parent.parent.parent / '.env'
+
+        if not env_path.exists():
+            return
+
+        with open(env_path, 'r') as f:
+            lines = f.readlines()
+
+        # Update refresh token line
+        updated = False
+        for i, line in enumerate(lines):
+            if line.startswith('REFRESH_TOKEN='):
+                lines[i] = f'REFRESH_TOKEN={new_refresh_token}\n'
+                updated = True
+                break
+
+        # Write back to .env
+        if updated:
+            with open(env_path, 'w') as f:
+                f.writelines(lines)
+            print(f"✓ Refresh token updated in .env")
 
 
     def get_customers_context(self) -> str:
@@ -206,7 +241,17 @@ class QuickbooksInvoiceService:
 
     def check_duplicate_bill(self, draft):
         """Check if bill already exists"""
+        from datetime import datetime
+
         bills = Bill.all(qb=self.qb_client)
+
+        # Normalize draft date to YYYY-MM-DD format for comparison
+        draft_date = draft.invoice_date
+        if draft_date and '/' in draft_date:
+            try:
+                draft_date = datetime.strptime(draft_date, "%m/%d/%Y").strftime("%Y-%m-%d")
+            except:
+                pass
 
         for bill in bills:
             # Check by invoice number
@@ -215,13 +260,18 @@ class QuickbooksInvoiceService:
                     print(f"Duplicate bill found by invoice number: {bill.Id}")
                     return bill
 
-            # Check by vendor + amount + date
+            # Check by vendor + date + amount (calculate from line items if TotalAmt not populated)
             if (bill.VendorRef and
                 bill.VendorRef.name == draft.vendor_display_name and
-                bill.TotalAmt == draft.total_amount and
-                bill.TxnDate == draft.invoice_date):
-                print(f"Duplicate bill found by vendor/amount/date: {bill.Id}")
-                return bill
+                bill.TxnDate == draft_date):
+
+                # Calculate bill total from line items
+                bill_total = sum(line.Amount for line in bill.Line if hasattr(line, 'Amount'))
+
+                # Compare amounts (allow small rounding difference)
+                if abs(bill_total - draft.total_amount) < 0.01:
+                    print(f"Duplicate bill found by vendor/date/amount: {bill.Id}")
+                    return bill
 
         return None
 
@@ -320,7 +370,129 @@ class QuickbooksInvoiceService:
         print(f"Bill created - Total: ${rounded_total}, Vendor: {vendor.DisplayName}")
         return bill
 
+    def push_receipt(self, draft) -> Purchase:
+        """Create a Purchase transaction for already-paid expenses (receipts)"""
+        # Validate total
+        if not draft.total_amount or draft.total_amount <= 0:
+            raise ValueError("Draft must have a valid total_amount")
 
-    
- 
+        # Create purchase
+        purchase = Purchase()
+        vendor = self.ensure_vendors(draft)
+        purchase.EntityRef = vendor.to_ref()
+        purchase.PaymentType = "CreditCard"  # Default to credit card, could be Cash/Check
 
+        # Set date (convert from MM/DD/YYYY to YYYY-MM-DD)
+        if draft.invoice_date:
+            from datetime import datetime
+            try:
+                date_obj = datetime.strptime(draft.invoice_date, "%m/%d/%Y")
+                purchase.TxnDate = date_obj.strftime("%Y-%m-%d")
+            except:
+                purchase.TxnDate = datetime.today().strftime("%Y-%m-%d")
+
+        # Get bank/credit card account (you'll need to configure this)
+        # For now, get first bank account
+        accounts = Account.all(qb=self.qb_client)
+        bank_account = None
+        for acc in accounts:
+            if acc.AccountType in ["Bank", "Credit Card"]:
+                bank_account = acc
+                print(f"Using account: {acc.Name} (Type: {acc.AccountType})")
+                break
+
+        if not bank_account:
+            raise ValueError("No bank or credit card account found in QuickBooks. Please add one first.")
+
+        purchase.AccountRef = bank_account.to_ref()
+
+        # Find customer
+        customer_ref = None
+        if draft.customer_name:
+            customers = Customer.all(qb=self.qb_client)
+            for customer in customers:
+                if customer.DisplayName == draft.customer_name:
+                    customer_ref = customer.to_ref()
+                    break
+        elif draft.job_site_address:
+            customer_ref = self.find_customer_by_address(draft.job_site_address)
+
+        # Add line items
+        for line in draft.line_items:
+            qb_line = AccountBasedExpenseLine()
+            qb_line.DetailType = "AccountBasedExpenseLineDetail"
+            qb_line.Amount = line.amount
+
+            # Match category to account
+            account_id = self.match_category_to_account(line.category)
+
+            account_ref = Ref()
+            account_ref.type = "Account"
+            account_ref.value = account_id
+
+            qb_line.AccountBasedExpenseLineDetail = AccountBasedExpenseLineDetail()
+            qb_line.AccountBasedExpenseLineDetail.AccountRef = account_ref
+            qb_line.Description = f"{line.item} - Qty: {line.quantity} @${line.rate}"
+
+            # Assign to customer if found
+            if customer_ref:
+                qb_line.AccountBasedExpenseLineDetail.CustomerRef = customer_ref
+
+            purchase.Line.append(qb_line)
+
+        # Add tax as separate line item if present
+        if draft.tax and draft.tax > 0:
+            tax_line = AccountBasedExpenseLine()
+            tax_line.DetailType = "AccountBasedExpenseLineDetail"
+            tax_line.Amount = draft.tax
+
+            tax_account_id = os.getenv('QB_EXPENSE_ACCOUNT_ID', '31')
+
+            tax_account_ref = Ref()
+            tax_account_ref.type = "Account"
+            tax_account_ref.value = tax_account_id
+
+            tax_line.AccountBasedExpenseLineDetail = AccountBasedExpenseLineDetail()
+            tax_line.AccountBasedExpenseLineDetail.AccountRef = tax_account_ref
+            tax_line.Description = "Tax"
+
+            if customer_ref:
+                tax_line.AccountBasedExpenseLineDetail.CustomerRef = customer_ref
+
+            purchase.Line.append(tax_line)
+
+        purchase.save(qb=self.qb_client)
+        print(f"Purchase created (already paid) - Total: ${draft.total_amount}, Vendor: {vendor.DisplayName}")
+        return purchase
+
+    def add_attachment(self, file_path, transaction):
+        """Attach a file to a QuickBooks transaction (Bill or Purchase)"""
+        import os
+        from pathlib import Path
+
+        attach = Attachable()
+        attach._FilePath = file_path
+        attach.FileName = Path(file_path).name
+
+        # Set ContentType based on file extension
+        file_ext = Path(file_path).suffix.lower()
+        if file_ext == '.pdf':
+            attach.ContentType = 'application/pdf'
+        elif file_ext in ['.jpg', '.jpeg']:
+            attach.ContentType = 'image/jpeg'
+        elif file_ext == '.png':
+            attach.ContentType = 'image/png'
+        else:
+            attach.ContentType = 'application/octet-stream'
+
+        # Link attachment to the transaction (Bill or Purchase)
+        attachable_ref = AttachableRef()
+        # Create manual Ref since Purchase doesn't have to_ref()
+        entity_ref = Ref()
+        entity_ref.type = transaction.qbo_object_name
+        entity_ref.value = transaction.Id
+        attachable_ref.EntityRef = entity_ref
+        attach.AttachableRef = [attachable_ref]
+
+        attach.save(qb=self.qb_client)
+        return attach
