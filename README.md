@@ -5,11 +5,20 @@ Automated invoice processing system that extracts invoice data from Gmail attach
 ## Features
 
 • **Smart Email Classification** - Automatically identifies invoice emails using AI
-• **Dual PDF Processing** - Handles both text-based and image-based (scanned) PDF invoices
-• **AI Data Extraction** - Uses OpenAI GPT-4 to extract structured invoice data
-• **QuickBooks Integration** - Automatically creates vendor bills with line items and tax
-• **Invoice Tracking** - Captures invoice numbers, dates, and due dates
+• **Dual PDF Processing** - Handles both text-based PDFs and image-based (scanned) PDFs with intelligent format detection
+• **Multi-format Support** - Processes PDF, JPEG, PNG, and JPG attachments
+• **AI Data Extraction** - Uses OpenAI GPT-4 Vision to extract structured invoice data from documents
+• **Intelligent Customer Matching** - AI-powered customer matching with address-based fallback and fuzzy matching
+• **Receipt vs Invoice Detection** - Automatically distinguishes between unpaid invoices and already-paid receipts
+• **Automatic Vendor Management** - Creates new vendors if not found, with fuzzy name matching
+• **Category to Account Mapping** - Intelligently maps expense categories to QuickBooks expense accounts
+• **Duplicate Prevention** - Checks for existing bills by invoice number, vendor, date, and amount
+• **File Attachment** - Automatically attaches invoice files to QuickBooks transactions
+• **QuickBooks Integration** - Creates Bills (unpaid) or Purchases (already-paid) with line items, tax, and customer/vendor assignments
+• **Invoice Tracking** - Captures invoice numbers, dates, due dates, and vendor information
 • **Gmail Automation** - Fetches unprocessed emails and labels them after processing
+• **Environment Management** - Automatic refresh token updates to .env file
+• **Sandbox/Production Support** - Seamless switching between QuickBooks sandbox and production environments
 
 ## Prerequisites
 
@@ -137,36 +146,105 @@ Uses OpenAI to classify whether an email contains an invoice based on:
 • Attachment filenames
 • Contextual information
 
-### 3. Data Extraction
+### 3. Format Detection & Processing
+Intelligently routes attachments to the appropriate processor:
+• **PDF files** - Attempts text extraction using pdfplumber
+  • If text is found → processes as text-based PDF
+  • If no text found → converts to images and uses vision processing
+• **Image files** (JPEG, PNG, JPG) - Directly processes as vision documents
+• All documents processed with OpenAI GPT-4 Vision for maximum accuracy
 
-**For text-based PDFs:**
-• Extracts text using pdfplumber
-• Sends text to OpenAI for structured data extraction
-
-**For image-based PDFs:**
-• Converts PDF pages to images using pdf2image
-• Uploads images to OpenAI Files API
-• Uses GPT-4 Vision to extract invoice data
-
-**Extracted data includes:**
+### 4. AI Data Extraction
+Uses context-aware extraction to obtain:
 • Vendor name
 • Invoice number
 • Invoice date and due date
-• Line items (description, quantity, rate)
+• Line items (description, quantity, unit rate, category)
 • Tax amount
 • Total amount
+• Job site address (if present)
+• Payment status (invoice vs receipt)
 
-### 4. QuickBooks Bill Creation
-Creates a vendor bill in QuickBooks with:
-• Vendor matching or creation
-• Line items with descriptions
-• Separate tax line item
-• Invoice metadata
+The AI also receives context about existing customers in QuickBooks to improve matching accuracy.
 
-### 5. Gmail Labeling
+### 5. Intelligent Matching & Validation
+
+**Customer Matching:**
+• AI attempts to identify the job site customer from invoice
+• Falls back to address-based matching if no name found
+• Uses fuzzy matching for similar customer names
+
+**Vendor Management:**
+• Checks if vendor exists in QuickBooks
+• Uses fuzzy matching to find similar vendor names
+• Automatically creates new vendors if no match found
+
+**Duplicate Detection:**
+• Checks for existing bills by invoice number
+• Checks for vendor/date/amount combinations
+• Prevents accidental duplicate entries
+
+**Category Mapping:**
+• Maps expense categories to QuickBooks accounts
+• Supports categories: materials, labor, equipment, fuel, permits, supplies, disposal, plants, soil, sprinklers, repairs, telephone, utilities, gas/electric
+• Falls back to default expense account if category not recognized
+
+### 6. QuickBooks Transaction Creation
+
+**For Invoices (unpaid):**
+• Creates a Bill in QuickBooks
+• Assigns vendor reference
+• Sets transaction and due dates
+• Adds line items with mapped expense accounts
+• Assigns customer reference if found
+• Adds tax as a separate line item
+
+**For Receipts (already-paid):**
+• Creates a Purchase transaction in QuickBooks
+• Marks as already-paid (CreditCard payment type)
+• Follows same line item and customer assignment logic
+• Tracks as completed expense
+
+**File Attachment:**
+• Automatically attaches the original invoice file to the transaction
+• Sets appropriate MIME type based on file format
+• Links attachment to the transaction for audit trail
+
+### 7. Gmail Labeling
 Marks processed emails with "ai_checked" label to avoid reprocessing.
 
+### 8. Token Management
+Automatically saves refreshed QuickBooks OAuth tokens to .env file to maintain session validity.
+
 ## Configuration
+
+### Environment Setup
+
+In `.env` file:
+```env
+# OpenAI
+OPENAI_API_KEY=your_openai_key
+
+# QuickBooks (Sandbox)
+SAND_CLIENT_ID=sandbox_client_id
+SAND_CLIENT_SECRET=sandbox_client_secret
+
+# QuickBooks (Production)
+CLIENT_ID=production_client_id
+CLIENT_SECRET=production_client_secret
+QB_REALM_ID=your_company_id
+REFRESH_TOKEN=your_refresh_token
+
+# Environment selection
+ENVIRONMENT=production  # or 'sandbox'
+REDIRECT_URI=https://developer.intuit.com/v2/OAuth2Playground/RedirectUrl
+
+# Default expense account
+QB_EXPENSE_ACCOUNT_ID=31
+
+# Gmail
+GOOGLE_OAUTH_SCOPES=...
+```
 
 ### Adjusting Email Fetch Count
 
@@ -175,38 +253,86 @@ In `main.py`, modify:
 messages = list(fetch_messages_with_attachments(max_results=10))
 ```
 
-### Changing QuickBooks Account
+### Customizing Category to Account Mapping
 
-In `push_invoice.py`, update the account reference:
+In `src/services/quickbooks_service.py`, update the `match_category_to_account()` method:
 ```python
-account_ref.value = 1  # Change to your expense account ID
+category_map = {
+    'materials': '63',      # Job Materials
+    'labor': '59',          # Cost of Labor
+    'equipment': '29',      # Equipment Rental
+    'fuel': '56',          # Fuel
+    'permits': '68',        # Permits
+    # Add more categories as needed
+}
 ```
+
+### Switching Between Sandbox and Production
+
+Change the `ENVIRONMENT` variable in `.env`:
+```env
+ENVIRONMENT=sandbox    # For testing
+ENVIRONMENT=production # For live data
+```
+
+The system will automatically use the appropriate credentials based on this setting.
 
 ## Error Handling
 
-The system handles:
-• Invalid or corrupted PDFs
-• Missing invoice data
-• QuickBooks API errors
-• OAuth token expiration
-• Missing attachments
+The system gracefully handles:
+• Invalid or corrupted PDFs - falls back to image processing
+• Missing invoice data - skips incomplete invoices with logging
+• QuickBooks API errors - catches and logs API exceptions
+• OAuth token expiration - automatically refreshes tokens
+• Missing attachments - skips emails without files
+• Duplicate entries - detects and prevents duplicate bills
+• Missing vendors/customers - creates new entities as needed
+• Account/category mismatches - uses default accounts
 
 ## Limitations
 
 • Requires valid Gmail and QuickBooks API credentials
-• OpenAI API calls incur costs
-• QuickBooks refresh tokens expire after 101 days
-• Tax is added as a line item, not proper tax tracking
-• Processes one email at a time (no parallel processing)
+• OpenAI API calls incur costs (especially for vision processing)
+• QuickBooks refresh tokens expire after 101 days (auto-renewed on each run)
+• Tax is added as a line item, not as formal tax tracking
+• Processes one email at a time (sequential processing, no parallel workers)
+• Requires existing QuickBooks customers for proper job site matching
+• Line item categorization relies on AI extraction accuracy
+• Image-based PDFs may require higher quality scans for accurate extraction
+
+## Troubleshooting
+
+### Token Expiration
+If you get OAuth errors:
+```bash
+python scripts/refresh_token.py
+```
+
+### Checking QB Accounts
+To see available accounts for category mapping:
+```bash
+python scripts/get_accounts.py
+```
+
+### Testing Invoice Processing
+To test a single receipt file:
+```bash
+python scripts/test_receipt.py
+```
 
 ## Future Enhancements
 
-• Bank transaction matching to invoices
-• Multi-page invoice support
-• Batch processing
-• Web dashboard
-• Email notifications
-• Invoice approval workflow
+• Bank transaction matching and reconciliation
+• Web dashboard for invoice review and approval
+• Email notifications for processing results
+• Invoice approval workflow with human-in-the-loop
+• Batch processing with parallel workers
+• Advanced OCR for complex invoice formats
+• Multi-currency support
+• Automated payment processing
+• Invoice analytics and reporting
+• Custom field mapping for QuickBooks
+• Support for multiple QB realms/companies
 
 ## License
 
