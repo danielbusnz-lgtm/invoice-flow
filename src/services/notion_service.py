@@ -13,9 +13,9 @@ NOTION_VERSION = "2022-06-28"
 NOTION_BASE_URL = "https://api.notion.com/v1"
 
 # Database IDs from Notion
-INVOICE_DB_ID = os.getenv("NOTION_INVOICE_DB_ID", "8bed64ad-5521-4dc7-a9f5-1cae5e2ea45c")
-SHIPPING_DB_ID = os.getenv("NOTION_SHIPPING_DB_ID", "b0f6ea56-f5e5-47d1-8a16-a59929037f40")
-CLIENT_COMMS_DB_ID = os.getenv("NOTION_CLIENT_DB_ID", "1daac1cd-036b-4025-82f1-b92e0037f09f")
+INVOICE_DB_ID = os.getenv("NOTION_INVOICE_DB_ID", "375b1990-5486-4647-9d2c-d5df6e573155")
+SHIPPING_DB_ID = os.getenv("NOTION_SHIPPING_DB_ID", "ec5274b0-aeaa-4d4d-a33b-654f38892572")
+CLIENT_COMMS_DB_ID = os.getenv("NOTION_CLIENT_DB_ID", "3189daa5-4a58-8167-ba85-c588c9269cc4")
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -94,28 +94,22 @@ def _create_page(database_id: str, properties: dict) -> dict:
 
 
 def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "") -> dict:
-    """Push an invoice draft to the Invoice Tracking database."""
+    """Push an invoice draft to the Invoice Tracker database."""
     properties = {
-        "Vendor": {"title": _build_title(draft.vendor_display_name)},
-        "Invoice Number": {"rich_text": _build_rich_text(draft.invoice_number)},
-        "Email Subject": {"rich_text": _build_rich_text(subject)},
-        "Memo": {"rich_text": _build_rich_text(draft.memo)},
-        "Job Site Address": {"rich_text": _build_rich_text(draft.job_site_address)},
-        "Customer": {"rich_text": _build_rich_text(draft.customer_name)},
-        "Status": {"select": _build_select("Pending")},
-        "Is Receipt": {"checkbox": _build_checkbox(draft.is_receipt)},
+        "Name": {"title": _build_title(draft.vendor_display_name or subject or "Invoice")},
+        "Vendor": {"rich_text": _build_rich_text(draft.vendor_display_name)},
+        "PO Number": {"rich_text": _build_rich_text(draft.invoice_number)},
+        "Notes": {"rich_text": _build_rich_text(draft.memo)},
+        "Status": {"select": _build_select("Received")},
     }
 
     if draft.total_amount is not None:
-        properties["Total Amount"] = {"number": draft.total_amount}
-
-    if draft.tax is not None:
-        properties["Tax"] = {"number": draft.tax}
+        properties["Amount"] = {"number": draft.total_amount}
 
     if draft.invoice_date:
         date_val = _build_date(draft.invoice_date)
         if date_val:
-            properties["Invoice Date"] = {"date": date_val}
+            properties["Date"] = {"date": date_val}
 
     if draft.due_date:
         date_val = _build_date(draft.due_date)
@@ -172,15 +166,10 @@ def push_shipping_to_notion(data: ShippingData, subject: str = "") -> dict:
         items_text = "\n".join(item_lines)
 
     properties = {
-        "Shipment": {"title": _build_title(shipment_title)},
+        "Name": {"title": _build_title(shipment_title)},
         "Tracking Number": {"rich_text": _build_rich_text(data.tracking_number)},
         "Order Number": {"rich_text": _build_rich_text(data.order_number)},
-        "Origin": {"rich_text": _build_rich_text(data.origin_address)},
-        "Destination": {"rich_text": _build_rich_text(data.destination_address)},
         "Vendor": {"rich_text": _build_rich_text(data.vendor_name)},
-        "Items": {"rich_text": _build_rich_text(items_text)},
-        "Notes": {"rich_text": _build_rich_text(data.notes)},
-        "Email Subject": {"rich_text": _build_rich_text(subject)},
         "Status": {"select": _build_select(status)},
     }
 
@@ -190,12 +179,12 @@ def push_shipping_to_notion(data: ShippingData, subject: str = "") -> dict:
     if data.shipment_date:
         date_val = _build_date(data.shipment_date)
         if date_val:
-            properties["Shipment Date"] = {"date": date_val}
+            properties["Date"] = {"date": date_val}
 
     if data.estimated_delivery:
         date_val = _build_date(data.estimated_delivery)
         if date_val:
-            properties["Estimated Delivery"] = {"date": date_val}
+            properties["Expected Delivery"] = {"date": date_val}
 
     return _create_page(SHIPPING_DB_ID, properties)
 

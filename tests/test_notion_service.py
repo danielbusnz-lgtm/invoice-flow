@@ -138,12 +138,12 @@ class TestPushInvoice:
         call_json = mock_post.call_args.kwargs["json"]
         assert call_json["parent"]["database_id"] == INVOICE_DB_ID
         props = call_json["properties"]
-        assert props["Vendor"]["title"][0]["text"]["content"] == "Acme Supplies"
-        assert props["Invoice Number"]["rich_text"][0]["text"]["content"] == "INV-1234"
-        assert props["Total Amount"]["number"] == 1500.00
-        assert props["Tax"]["number"] == 75.00
-        assert props["Status"]["select"]["name"] == "Pending"
-        assert props["Is Receipt"]["checkbox"] is False
+        assert props["Name"]["title"][0]["text"]["content"] == "Acme Supplies"
+        assert props["Vendor"]["rich_text"][0]["text"]["content"] == "Acme Supplies"
+        assert props["PO Number"]["rich_text"][0]["text"]["content"] == "INV-1234"
+        assert props["Amount"]["number"] == 1500.00
+        assert props["Status"]["select"]["name"] == "Received"
+        assert props["Notes"]["rich_text"][0]["text"]["content"] == "March delivery"
         print("Invoice pushed to Notion correctly")
 
     @patch("services.notion_service.requests.post")
@@ -156,24 +156,28 @@ class TestPushInvoice:
         push_invoice_to_notion(self._sample_draft())
 
         props = mock_post.call_args.kwargs["json"]["properties"]
-        assert props["Invoice Date"]["date"]["start"] == "2026-03-01"
+        assert props["Date"]["date"]["start"] == "2026-03-01"
         assert props["Due Date"]["date"]["start"] == "2026-03-31"
         print("Invoice dates formatted correctly")
 
     @patch("services.notion_service.requests.post")
-    def test_push_invoice_receipt(self, mock_post):
+    def test_push_invoice_minimal(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"id": "page-789"}
         mock_post.return_value = mock_resp
 
-        draft = self._sample_draft()
-        draft.is_receipt = True
+        draft = InvoiceDraft(
+            vendor_display_name="Test Vendor",
+            line_items=[],
+        )
         push_invoice_to_notion(draft)
 
         props = mock_post.call_args.kwargs["json"]["properties"]
-        assert props["Is Receipt"]["checkbox"] is True
-        print("Receipt checkbox set correctly")
+        assert props["Name"]["title"][0]["text"]["content"] == "Test Vendor"
+        assert "Amount" not in props
+        assert "Date" not in props
+        print("Minimal invoice pushed correctly")
 
     @patch("services.notion_service.requests.post")
     def test_push_invoice_api_error(self, mock_post):
@@ -221,7 +225,7 @@ class TestPushShipping:
 
         assert result["id"] == "ship-123"
         props = mock_post.call_args.kwargs["json"]["properties"]
-        assert "FedEx" in props["Shipment"]["title"][0]["text"]["content"]
+        assert "FedEx" in props["Name"]["title"][0]["text"]["content"]
         assert props["Tracking Number"]["rich_text"][0]["text"]["content"] == "794644790138"
         assert props["Carrier"]["select"]["name"] == "FedEx"
         assert props["Status"]["select"]["name"] == "In Transit"
@@ -238,12 +242,12 @@ class TestPushShipping:
         push_shipping_to_notion(self._sample_shipping())
 
         props = mock_post.call_args.kwargs["json"]["properties"]
-        assert props["Shipment Date"]["date"]["start"] == "2026-03-01"
-        assert props["Estimated Delivery"]["date"]["start"] == "2026-03-04"
+        assert props["Date"]["date"]["start"] == "2026-03-01"
+        assert props["Expected Delivery"]["date"]["start"] == "2026-03-04"
         print("Shipping dates formatted correctly")
 
     @patch("services.notion_service.requests.post")
-    def test_push_shipping_items_formatted(self, mock_post):
+    def test_push_shipping_order_number(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"id": "ship-789"}
@@ -252,11 +256,8 @@ class TestPushShipping:
         push_shipping_to_notion(self._sample_shipping())
 
         props = mock_post.call_args.kwargs["json"]["properties"]
-        items_text = props["Items"]["rich_text"][0]["text"]["content"]
-        assert "Lumber 2x4" in items_text
-        assert "qty: 50" in items_text
-        assert "200 lbs" in items_text
-        print("Shipping items formatted correctly")
+        assert props["Order Number"]["rich_text"][0]["text"]["content"] == "ORD-5678"
+        print("Order number pushed correctly")
 
     @patch("services.notion_service.requests.post")
     def test_push_shipping_delivered_status(self, mock_post):
