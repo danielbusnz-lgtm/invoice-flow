@@ -34,10 +34,9 @@ def _get_access_token():
 
     authority = f"https://login.microsoftonline.com/{tenant_id}"
 
-    app = msal.ClientApplication(
+    app = msal.PublicClientApplication(
         client_id=client_id,
         authority=authority,
-        client_credential=client_secret,
     )
 
     # Try refresh token first
