@@ -115,17 +115,17 @@ class TestHelperFunctions:
 
     def test_build_tracking_link_fedex(self):
         result = _build_tracking_link("FedEx", "794644790138")
-        assert result == "https://www.fedex.com/fedextrack/?trknbr=794644790138"
+        assert result == "https://www.trackingmore.com/track?number=794644790138&express=fedex"
         print("FedEx tracking link built correctly")
 
     def test_build_tracking_link_ups(self):
         result = _build_tracking_link("UPS", "1Z999AA10123456784")
-        assert result == "https://www.ups.com/track?tracknum=1Z999AA10123456784"
+        assert result == "https://www.trackingmore.com/track?number=1Z999AA10123456784&express=ups"
         print("UPS tracking link built correctly")
 
     def test_build_tracking_link_usps(self):
         result = _build_tracking_link("USPS", "9400111899223")
-        assert result == "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223"
+        assert result == "https://www.trackingmore.com/track?number=9400111899223&express=usps"
         print("USPS tracking link built correctly")
 
     def test_build_tracking_link_unknown_carrier(self):
@@ -360,7 +360,7 @@ class TestPushShipping:
         assert props["Status"]["select"]["name"] == "In Transit"
         assert props["Vendor"]["rich_text"][0]["text"]["content"] == "Home Depot"
         assert props["Latest Event"]["rich_text"][0]["text"]["content"] == "in transit"
-        assert props["Tracking Link"]["url"] == "https://www.fedex.com/fedextrack/?trknbr=794644790138"
+        assert props["Tracking Link"]["url"] == "https://www.trackingmore.com/track?number=794644790138&express=fedex"
         assert props["Email Link"]["url"] == "https://outlook.office365.com/mail/id/msg-ship-001"
         print("Shipping pushed to Notion correctly")
 

@@ -80,15 +80,18 @@ def _build_email_link(message_id: Optional[str]) -> Optional[str]:
 
 
 def _build_tracking_link(carrier: Optional[str], tracking_number: Optional[str]) -> Optional[str]:
-    """Build a carrier tracking URL from carrier name and tracking number."""
+    """Build a TrackingMore tracking URL from carrier name and tracking number."""
     if not carrier or not tracking_number:
         return None
-    carrier_urls = {
-        "fedex": f"https://www.fedex.com/fedextrack/?trknbr={tracking_number}",
-        "ups": f"https://www.ups.com/track?tracknum={tracking_number}",
-        "usps": f"https://tools.usps.com/go/TrackConfirmAction?tLabels={tracking_number}",
+    carrier_codes = {
+        "fedex": "fedex",
+        "ups": "ups",
+        "usps": "usps",
     }
-    return carrier_urls.get(carrier.lower())
+    code = carrier_codes.get(carrier.lower())
+    if not code:
+        return None
+    return f"https://www.trackingmore.com/track?number={tracking_number}&express={code}"
 
 
 def _build_file_property(filename: str, file_url: str) -> list:
