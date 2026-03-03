@@ -91,7 +91,6 @@ def fetch_messages_with_attachments(max_results: int = 10, query: Optional[str] 
         "$top": max_results,
         "$select": "id,subject,body,hasAttachments,from",
         "$orderby": "receivedDateTime desc",
-        "$filter": "hasAttachments eq true",
     }
 
     response = httpx.get(endpoint, headers=headers, params=params, timeout=30.0)
