@@ -168,33 +168,33 @@ def main():
                 draft.total_amount = calculated_total
                 print(draft.total_amount)
 
-            # Route to correct QuickBooks transaction type
-            qb = get_qb_service()
-            if hasattr(draft, 'is_receipt') and draft.is_receipt:
-                # Receipt (already paid) → Create Purchase
-                print(f"[{idx}/{len(messages)}] {message_id}: RECEIPT detected - creating Purchase (already paid)")
-                transaction = qb.push_receipt(draft)
-            else:
-                # Invoice (unpaid) → Create Bill
-                transaction = qb.push_invoice(draft)
-
-            # Attach the file
-            if latest_file:
-                print(f"Attaching file: {latest_file}")
-                attach = qb.add_attachment(latest_file, transaction)
-
-            transaction_id = getattr(transaction, "Id", None)
-            if transaction_id:
-                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created (Id={transaction_id})")
-            else:
-                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created")
-
-            # Push to Notion Invoice Tracking
+            # Push to Notion Invoice Tracking (always, even if QB fails)
             try:
                 notion_page = push_invoice_to_notion(draft, subject, message_id)
                 print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Invoice Tracking")
             except Exception as e:
                 print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
+
+            # Route to correct QuickBooks transaction type
+            try:
+                qb = get_qb_service()
+                if hasattr(draft, 'is_receipt') and draft.is_receipt:
+                    print(f"[{idx}/{len(messages)}] {message_id}: RECEIPT detected - creating Purchase (already paid)")
+                    transaction = qb.push_receipt(draft)
+                else:
+                    transaction = qb.push_invoice(draft)
+
+                if latest_file:
+                    print(f"Attaching file: {latest_file}")
+                    qb.add_attachment(latest_file, transaction)
+
+                transaction_id = getattr(transaction, "Id", None)
+                if transaction_id:
+                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created (Id={transaction_id})")
+                else:
+                    print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created")
+            except Exception as e:
+                print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks SKIPPED - {e}")
         else:
             print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
 

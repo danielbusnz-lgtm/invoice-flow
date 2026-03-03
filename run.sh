@@ -5,7 +5,7 @@
 # Crontab entry:
 #   */10 * * * * /Users/danielbrooks/Projects/Personal/invoice-flow/run.sh >> /Users/danielbrooks/Projects/Personal/invoice-flow/logs/cron.log 2>&1
 
-set -e
+# Note: no 'set -e' so the script logs completion even if python exits non-zero
 
 PROJECT_DIR="/Users/danielbrooks/Projects/Personal/invoice-flow"
 PYTHON="/Users/danielbrooks/.pyenv/versions/3.11.9/bin/python"
