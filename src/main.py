@@ -15,7 +15,7 @@ from parsers.pdf_parser import extract_text_from_pdf
 from parsers.ai_parser import invoice_label, pdf_invoice, ai_invoice, parse_shipping, parse_client_communication
 from services.quickbooks_service import QuickbooksInvoiceService
 from services.outlook_service import fetch_messages_with_attachments, label_message
-from services.notion_service import push_invoice_to_notion, push_shipping_to_notion, push_client_comm_to_notion
+from services.notion_service import push_invoice_to_notion, push_shipping_to_notion, push_client_comm_to_notion, query_invoice_by_number
 from services.tracker import is_processed, mark_processed
 
 
@@ -168,12 +168,17 @@ def main():
                 draft.total_amount = calculated_total
                 print(draft.total_amount)
 
-            # Push to Notion Invoice Tracking (always, even if QB fails)
-            try:
-                notion_page = push_invoice_to_notion(draft, subject, message_id)
-                print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Invoice Tracking")
-            except Exception as e:
-                print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
+            # Push to Notion Invoice Tracking (skip if duplicate)
+            if draft.invoice_number and query_invoice_by_number(draft.invoice_number):
+                print(f"[{idx}/{len(messages)}] {message_id}: duplicate invoice #{draft.invoice_number}, skipping Notion")
+            else:
+                try:
+                    attachment_filename = attachments[0][0] if attachments else ""
+                    file_url = f"http://45.55.121.238/attachments/{attachment_filename}" if attachment_filename else ""
+                    notion_page = push_invoice_to_notion(draft, subject, message_id, file_url)
+                    print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Invoice Tracking")
+                except Exception as e:
+                    print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
 
             # Route to correct QuickBooks transaction type
             try:

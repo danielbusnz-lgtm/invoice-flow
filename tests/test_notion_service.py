@@ -10,6 +10,7 @@ from services.notion_service import (
     push_invoice_to_notion,
     push_shipping_to_notion,
     push_client_comm_to_notion,
+    query_invoice_by_number,
     _parse_date,
     _build_rich_text,
     _build_title,
@@ -18,6 +19,7 @@ from services.notion_service import (
     _build_checkbox,
     _build_email_link,
     _build_tracking_link,
+    _build_file_property,
     INVOICE_DB_ID,
     SHIPPING_DB_ID,
     CLIENT_COMMS_DB_ID,
@@ -139,6 +141,60 @@ class TestHelperFunctions:
         assert _build_tracking_link("FedEx", None) is None
         print("None tracking number returns None")
 
+    def test_build_file_property(self):
+        result = _build_file_property("invoice.pdf", "http://example.com/invoice.pdf")
+        assert len(result) == 1
+        assert result[0]["name"] == "invoice.pdf"
+        assert result[0]["type"] == "external"
+        assert result[0]["external"]["url"] == "http://example.com/invoice.pdf"
+        print("File property built correctly")
+
+    def test_build_file_property_empty_url(self):
+        result = _build_file_property("invoice.pdf", "")
+        assert result == []
+        print("Empty file URL returns empty list")
+
+
+# ---------------------------------------------------------------------------
+# Invoice dedup tests
+# ---------------------------------------------------------------------------
+
+class TestQueryInvoice:
+
+    @patch("services.notion_service.requests.post")
+    def test_query_finds_duplicate(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"results": [{"id": "existing-page"}]}
+        mock_post.return_value = mock_resp
+
+        assert query_invoice_by_number("INV-1234") is True
+        print("Duplicate invoice detected")
+
+    @patch("services.notion_service.requests.post")
+    def test_query_no_duplicate(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"results": []}
+        mock_post.return_value = mock_resp
+
+        assert query_invoice_by_number("INV-9999") is False
+        print("No duplicate found")
+
+    def test_query_empty_number(self):
+        assert query_invoice_by_number("") is False
+        assert query_invoice_by_number(None) is False
+        print("Empty invoice number returns False")
+
+    @patch("services.notion_service.requests.post")
+    def test_query_api_error_returns_false(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_post.return_value = mock_resp
+
+        assert query_invoice_by_number("INV-1234") is False
+        print("API error returns False (safe to proceed)")
+
 
 # ---------------------------------------------------------------------------
 # Invoice push tests
@@ -219,6 +275,38 @@ class TestPushInvoice:
         assert "Date" not in props
         assert "Email Link" not in props
         print("Minimal invoice pushed correctly")
+
+    @patch("services.notion_service.requests.post")
+    def test_push_invoice_with_file(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "page-file"}
+        mock_post.return_value = mock_resp
+
+        push_invoice_to_notion(
+            self._sample_draft(), "Test", "msg-1",
+            file_url="http://45.55.121.238/attachments/invoice.pdf",
+        )
+
+        props = mock_post.call_args.kwargs["json"]["properties"]
+        files = props["Invoice File"]["files"]
+        assert len(files) == 1
+        assert files[0]["name"] == "invoice.pdf"
+        assert files[0]["external"]["url"] == "http://45.55.121.238/attachments/invoice.pdf"
+        print("Invoice file property set correctly")
+
+    @patch("services.notion_service.requests.post")
+    def test_push_invoice_no_file(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "page-nofile"}
+        mock_post.return_value = mock_resp
+
+        push_invoice_to_notion(self._sample_draft())
+
+        props = mock_post.call_args.kwargs["json"]["properties"]
+        assert "Invoice File" not in props
+        print("No file URL means no Invoice File property")
 
     @patch("services.notion_service.requests.post")
     def test_push_invoice_api_error(self, mock_post):

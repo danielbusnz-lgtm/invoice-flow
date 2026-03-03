@@ -91,6 +91,39 @@ def _build_tracking_link(carrier: Optional[str], tracking_number: Optional[str])
     return carrier_urls.get(carrier.lower())
 
 
+def _build_file_property(filename: str, file_url: str) -> list:
+    """Build a Notion files property value from an external URL."""
+    if not file_url:
+        return []
+    return [{"name": filename, "type": "external", "external": {"url": file_url}}]
+
+
+def query_invoice_by_number(invoice_number: str) -> bool:
+    """Check if an invoice with this PO Number already exists in Notion."""
+    if not invoice_number:
+        return False
+
+    payload = {
+        "filter": {
+            "property": "PO Number",
+            "rich_text": {"equals": invoice_number},
+        },
+        "page_size": 1,
+    }
+
+    response = requests.post(
+        f"{NOTION_BASE_URL}/databases/{INVOICE_DB_ID}/query",
+        headers=HEADERS,
+        json=payload,
+    )
+
+    if response.status_code != 200:
+        return False
+
+    results = response.json().get("results", [])
+    return len(results) > 0
+
+
 def _create_page(database_id: str, properties: dict) -> dict:
     """Create a page in a Notion database."""
     payload = {
@@ -112,7 +145,7 @@ def _create_page(database_id: str, properties: dict) -> dict:
     return response.json()
 
 
-def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "", message_id: str = "") -> dict:
+def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "", message_id: str = "", file_url: str = "") -> dict:
     """Push an invoice draft to the Invoice Tracker database."""
     properties = {
         "Name": {"title": _build_title(draft.vendor_display_name or subject or "Invoice")},
@@ -138,6 +171,10 @@ def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "", message_id: s
     email_link = _build_email_link(message_id)
     if email_link:
         properties["Email Link"] = {"url": email_link}
+
+    if file_url:
+        filename = file_url.rsplit("/", 1)[-1]
+        properties["Invoice File"] = {"files": _build_file_property(filename, file_url)}
 
     return _create_page(INVOICE_DB_ID, properties)
 
