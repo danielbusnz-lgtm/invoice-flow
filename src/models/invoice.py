@@ -43,5 +43,37 @@ class InvoiceData(BaseModel):
     customer_name: Optional[str] = None  # AI-matched customer name
 
 
+class ShippingItem(BaseModel):
+    description: str
+    quantity: Optional[float] = None
+    weight: Optional[str] = None
+
+
+class ShippingData(BaseModel):
+    carrier: Optional[str] = None
+    tracking_number: Optional[str] = None
+    order_number: Optional[str] = None
+    shipment_date: Optional[str] = None
+    estimated_delivery: Optional[str] = None
+    delivery_status: Optional[str] = None
+    origin_address: Optional[str] = None
+    destination_address: Optional[str] = None
+    items: List[ShippingItem] = []
+    vendor_name: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ClientData(BaseModel):
+    client_name: Optional[str] = None
+    subject: Optional[str] = None
+    project_name: Optional[str] = None
+    summary: str
+    action_items: List[str] = []
+    key_dates: List[str] = []
+    response_needed: Optional[bool] = False
+    urgency: Optional[Literal["low", "medium", "high"]] = None
+    notes: Optional[str] = None
+
+
 class LabelSort(BaseModel):
-    label: Literal["invoice", "none"]
+    label: Literal["invoice", "shipping", "insurance", "client_communications", "none"]

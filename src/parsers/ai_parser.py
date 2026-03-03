@@ -1,13 +1,19 @@
 from typing import Optional
-from openai import OpenAI
-from models.invoice import InvoiceData, InvoiceDraft, InvoiceLine, LabelSort
+from openai import OpenAI, OpenAIError, AuthenticationError    
+from models.invoice import InvoiceData, InvoiceDraft, InvoiceLine, LabelSort, ShippingData, ClientData
+import logging
 
+logger = logging.getLogger(__name__) 
 
 def invoice_label(message_text: str, attachments: list, client: Optional[OpenAI] = None):
     """Classify email as invoice or not using OpenAI"""
     if client is None:
-        client = OpenAI()
-
+        try:
+            client = OpenAI()
+        except OpenAIError as e:
+            logger.error("OpenAI auth failed: %s", e)
+            return None
+    
     context = message_text
 
     if attachments:
@@ -15,18 +21,29 @@ def invoice_label(message_text: str, attachments: list, client: Optional[OpenAI]
         for filename, data in attachments:
             context += f"- {filename}\n"
 
-    response = client.responses.parse(
-        model="gpt-4o-2024-08-06",
-        input=[
-            {"role": "system", "content": "Extract wheter or not the following email is an invoice or not. If there is an attachment, it is likely an invoice. If it is an email return: invoice and if not return: none."},
-            {
-                "role": "user",
-                "content": context,
-            },
-        ],
-        text_format=LabelSort,
-    )
-
+    try:
+        response = client.responses.parse(
+            model="gpt-4o-2024-08-06",
+            input=[
+                {"role": "system", "content": (
+                    "Classify the following email into one of these categories:\n"
+                    "- invoice: Bills, receipts, payment requests, invoices with attached documents requesting or confirming payment.\n"
+                    "- shipping: Delivery confirmations, tracking numbers, shipment notifications, freight or courier updates.\n"
+                    "- insurance: Insurance policies, claims, certificates of insurance, coverage documents, liability or workers comp.\n"
+                    "- client_communications: General client emails, project updates, questions, scheduling, meeting requests, status reports.\n"
+                    "- none: Spam, newsletters, promotions, or anything that does not fit the above categories.\n\n"
+                    "Return only the label."
+                )},
+                {
+                    "role": "user",
+                    "content": context,
+                },
+            ],
+            text_format=LabelSort,
+        )
+    except AuthenticationError as e: 
+        logger.error("OpenAI auth failed: %s", e)
+        return None
     return response.output_parsed.label
 
 
@@ -165,3 +182,105 @@ def ai_invoice(message_text: str, file_path: str, client: Optional[OpenAI] = Non
         job_site_address=payload.job_site_address,
         customer_name=payload.customer_name,
     )
+
+
+def parse_shipping(message_text: str, attachments: list, client: Optional[OpenAI] = None) -> Optional[ShippingData]:
+    """Extract structured shipping data from an email and its attachments"""
+    if client is None:
+        try:
+            client = OpenAI()
+        except OpenAIError as e:
+            logger.error("OpenAI auth failed: %s", e)
+            return None
+
+    context = message_text
+
+    if attachments:
+        context += "\n\nAttachment contents:\n"
+        for filename, data in attachments:
+            if isinstance(data, str):
+                context += f"\n--- {filename} ---\n{data}\n"
+            else:
+                context += f"\n--- {filename} (binary file) ---\n"
+
+    system_prompt = (
+        "Extract structured shipping and delivery data from this email.\n"
+        "Look for:\n"
+        "- Carrier name (FedEx, UPS, USPS, freight company, etc.)\n"
+        "- Tracking number(s)\n"
+        "- Order or reference number\n"
+        "- Shipment date and estimated delivery date (format: MM/DD/YYYY)\n"
+        "- Delivery status (shipped, in transit, delivered, etc.)\n"
+        "- Origin and destination addresses\n"
+        "- Items being shipped with quantities and weights\n"
+        "- Vendor or sender name\n"
+        "- Any additional notes\n\n"
+        "REQUIRED: At least one of tracking_number, order_number, or carrier.\n"
+        "OPTIONAL: All other fields. Return all dates in MM/DD/YYYY format."
+    )
+
+    try:
+        response = client.responses.parse(
+            model="gpt-4o-2024-08-06",
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ],
+            text_format=ShippingData,
+        )
+    except AuthenticationError as e:
+        logger.error("OpenAI auth failed: %s", e)
+        return None
+
+    return response.output_parsed
+
+
+def parse_client_communication(message_text: str, attachments: list, client: Optional[OpenAI] = None) -> Optional[ClientData]:
+    """Extract structured data from a client communication email"""
+    if client is None:
+        try:
+            client = OpenAI()
+        except OpenAIError as e:
+            logger.error("OpenAI auth failed: %s", e)
+            return None
+
+    context = message_text
+
+    if attachments:
+        context += "\n\nAttachment contents:\n"
+        for filename, data in attachments:
+            if isinstance(data, str):
+                context += f"\n--- {filename} ---\n{data}\n"
+            else:
+                context += f"\n--- {filename} (binary file) ---\n"
+
+    system_prompt = (
+        "Extract structured data from this client communication email.\n"
+        "Look for:\n"
+        "- Client name (who sent or is referenced in the email)\n"
+        "- Subject or main topic of the email\n"
+        "- Project name or reference if mentioned\n"
+        "- A brief summary of the email content (2-3 sentences)\n"
+        "- Action items: specific tasks or requests that need to be done\n"
+        "- Key dates: any dates or deadlines mentioned (format: MM/DD/YYYY - description)\n"
+        "- Whether a response is needed (true/false)\n"
+        "- Urgency level: low (general info), medium (needs attention soon), high (urgent/time-sensitive)\n"
+        "- Any additional notes\n\n"
+        "REQUIRED: summary.\n"
+        "OPTIONAL: All other fields. Return all dates in MM/DD/YYYY format."
+    )
+
+    try:
+        response = client.responses.parse(
+            model="gpt-4o-2024-08-06",
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ],
+            text_format=ClientData,
+        )
+    except AuthenticationError as e:
+        logger.error("OpenAI auth failed: %s", e)
+        return None
+
+    return response.output_parsed

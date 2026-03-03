@@ -6,31 +6,21 @@ from pathlib import Path
 # Third-party imports
 from openai import OpenAI
 from pdf2image import convert_from_path
-from googleapiclient.discovery import build
 
 # QuickBooks imports
 from quickbooks.exceptions import QuickbooksException
 
 # Local imports
 from parsers.pdf_parser import extract_text_from_pdf
-from parsers.ai_parser import invoice_label, pdf_invoice, ai_invoice
+from parsers.ai_parser import invoice_label, pdf_invoice, ai_invoice, parse_shipping, parse_client_communication
 from services.quickbooks_service import QuickbooksInvoiceService
-from services.gmail_service import fetch_messages_with_attachments
-from utils.auth import load_creds, get_or_create_label
+from services.outlook_service import fetch_messages_with_attachments, label_message
+from services.notion_service import push_invoice_to_notion, push_shipping_to_notion, push_client_comm_to_notion
+from services.tracker import is_processed, mark_processed
 
 
 # Main Processing Function
 def main():
-    try:
-        creds = load_creds()
-        service = build("gmail", "v1", credentials=creds)
-        get_or_create_label(service, "ai_checked")
-
-    except QuickbooksException as e:
-        print(f"quickbooks error '{e.message}'(code:'{e.error_code}'")
-        print(f"quickbooks detail:'{e.detail}'")
-        return
-
     project_root = Path(__file__).parent.parent
     download_dir = project_root / "attachments"
     download_dir.mkdir(exist_ok=True)
@@ -45,9 +35,20 @@ def main():
 
     # Process each message
     for idx, (message_id, subject, message_text, attachments) in enumerate(messages, start=1):
+        if is_processed(message_id):
+            print(f"[{idx}/{len(messages)}] {message_id}: already processed, skipping")
+            continue
+
         draft = None
         label = invoice_label(message_text, attachments, client=openai_client)
         print(f"[{idx}/{len(messages)}] {message_id}: subject -> {subject} label -> {label}")
+
+        # Apply the label to the email in Outlook
+        try:
+            label_message(message_id, label)
+            print(f"[{idx}/{len(messages)}] {message_id}: Outlook category set to '{label}'")
+        except Exception as e:
+            print(f"[{idx}/{len(messages)}] {message_id}: Failed to set Outlook category: {e}")
 
         project_root = Path(__file__).parent.parent
         attachments_dir = project_root / "attachments"
@@ -59,6 +60,59 @@ def main():
             latest_file = str(attachments_dir / attachment_filename)
 
 
+
+        if label == "shipping":
+            print(f"[{idx}/{len(messages)}] {message_id}: parsing shipping data...")
+            shipping_data = parse_shipping(message_text, attachments, client=openai_client)
+            if shipping_data:
+                print(f"  Carrier: {shipping_data.carrier}")
+                print(f"  Tracking: {shipping_data.tracking_number}")
+                print(f"  Status: {shipping_data.delivery_status}")
+                print(f"  Destination: {shipping_data.destination_address}")
+                if shipping_data.items:
+                    for item in shipping_data.items:
+                        print(f"  Item: {item.description} (qty: {item.quantity})")
+                try:
+                    notion_page = push_shipping_to_notion(shipping_data, subject)
+                    print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Shipping Tracker")
+                except Exception as e:
+                    print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
+            else:
+                print(f"[{idx}/{len(messages)}] {message_id}: could not extract shipping data")
+            mark_processed(message_id)
+            continue
+
+        if label == "client_communications":
+            print(f"[{idx}/{len(messages)}] {message_id}: parsing client communication...")
+            client_data = parse_client_communication(message_text, attachments, client=openai_client)
+            if client_data:
+                print(f"  Client: {client_data.client_name}")
+                print(f"  Project: {client_data.project_name}")
+                print(f"  Summary: {client_data.summary}")
+                print(f"  Urgency: {client_data.urgency}")
+                print(f"  Response needed: {client_data.response_needed}")
+                if client_data.action_items:
+                    print(f"  Action items:")
+                    for action in client_data.action_items:
+                        print(f"    * {action}")
+                if client_data.key_dates:
+                    print(f"  Key dates:")
+                    for date in client_data.key_dates:
+                        print(f"    * {date}")
+                try:
+                    notion_page = push_client_comm_to_notion(client_data, subject)
+                    print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Client Communications")
+                except Exception as e:
+                    print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
+            else:
+                print(f"[{idx}/{len(messages)}] {message_id}: could not extract client data")
+            mark_processed(message_id)
+            continue
+
+        if label == "insurance":
+            print(f"[{idx}/{len(messages)}] {message_id}: classified as 'insurance' - logged for review")
+            mark_processed(message_id)
+            continue
 
         if label == "invoice" and latest_file:
             print("starting ai_invoice process")
@@ -126,8 +180,17 @@ def main():
                 print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created (Id={transaction_id})")
             else:
                 print(f"[{idx}/{len(messages)}] {message_id}: QuickBooks transaction created")
+
+            # Push to Notion Invoice Tracking
+            try:
+                notion_page = push_invoice_to_notion(draft, subject)
+                print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Invoice Tracking")
+            except Exception as e:
+                print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
         else:
             print(f"[{idx}/{len(messages)}] {message_id}: no valid invoice data found")
+
+        mark_processed(message_id)
 
 
 if __name__ == "__main__":

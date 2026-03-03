@@ -43,16 +43,19 @@ class QuickbooksInvoiceService:
                 redirect_uri=os.getenv('REDIRECT_URI'),
             )
 
+            try:
+                self.qb_client = QuickBooks(
+                    auth_client=self.auth_client,
+                    refresh_token=os.getenv('REFRESH_TOKEN'),
+                    company_id=os.getenv('QB_REALM_ID'),
+                )
 
-            self.qb_client = QuickBooks(
-                auth_client=self.auth_client,
-                refresh_token=os.getenv('REFRESH_TOKEN'),
-                company_id=os.getenv('QB_REALM_ID'),
-	        )
+                # Save new refresh token after initialization
+                self._save_refresh_token()
 
-            # Save new refresh token after initialization
-            self._save_refresh_token()
-
+            except Exception as e:
+                print(f"QuickBooks connection failed: {e}")
+                self._refresh_and_reconnect()
     def _save_refresh_token(self):
         """Save the new refresh token to .env file"""
         new_refresh_token = self.auth_client.refresh_token
@@ -84,6 +87,24 @@ class QuickbooksInvoiceService:
                 f.writelines(lines)
             print(f"✓ Refresh token updated in .env")
 
+    def _refresh_and_reconnect(self):
+        """Try to refresh the token and reconnect"""
+        try:
+            print("Attempting token refresh...")
+            self.auth_client.refresh(refresh_token=os.getenv('REFRESH_TOKEN'))
+            self._save_refresh_token()
+            load_dotenv(override=True)
+
+            self.qb_client = QuickBooks(
+                auth_client=self.auth_client,
+                refresh_token=self.auth_client.refresh_token,
+                company_id=os.getenv('QB_REALM_ID'),
+            )
+            print("Token refreshed and reconnected successfully")
+        except Exception as e:
+            print(f"Token refresh failed: {e}")
+            print("Run: python scripts/reauth_quickbooks.py")
+            raise
 
     def get_customers_context(self) -> str:
         """Get all customers with addresses formatted for AI context"""
@@ -131,23 +152,71 @@ class QuickbooksInvoiceService:
 
         category_lower = category.lower().strip()
 
-        # Category to account mapping (customize based on your QB accounts)
+        # Category to account mapping
         category_map = {
-            'materials': '63',  # Job Materials
-            'labor': '59',  # Cost of Labor
-            'equipment': '29',  # Equipment Rental
-            'fuel': '56',  # Fuel
-            'permits': '68',  # Permits
-            'supplies': '20',  # Supplies
-            'disposal': '28',  # Disposal Fees
-            'plants': '66',  # Plants and Soil
-            'soil': '66',  # Plants and Soil
-            'sprinklers': '67',  # Sprinklers and Drip Systems
-            'repairs': '75',  # Equipment Repairs
-            'telephone': '77',  # Telephone
-            'utilities': '24',  # Utilities
-            'gas': '76',  # Gas and Electric
-            'electric': '76',  # Gas and Electric
+            'accounting': '69',
+            'advertising': '7',
+            'automobile': '55',
+            'auto': '55',
+            'bank charges': '8',
+            'bookkeeper': '70',
+            'building repairs': '73',
+            'commissions': '9',
+            'fees': '9',
+            'cost of labor': '59',
+            'labor': '59',
+            'decks': '64',
+            'patios': '64',
+            'disposal': '28',
+            'dues': '10',
+            'subscriptions': '10',
+            'equipment rental': '62',
+            'equipment': '29',
+            'equipment repairs': '75',
+            'repairs': '75',
+            'fountain': '65',
+            'garden lighting': '65',
+            'lighting': '65',
+            'fuel': '56',
+            'gas and electric': '76',
+            'gas': '76',
+            'electric': '76',
+            'installation': '60',
+            'insurance': '11',
+            'job expenses': '58',
+            'job materials': '63',
+            'materials': '63',
+            'lawyer': '71',
+            'legal': '12',
+            'professional fees': '12',
+            'maintenance': '72',
+            'maintenance and repair': '72',
+            'meals': '13',
+            'entertainment': '13',
+            'office': '15',
+            'office expenses': '15',
+            'permits': '68',
+            'plants': '66',
+            'soil': '66',
+            'plants and soil': '66',
+            'promotional': '16',
+            'purchases': '78',
+            'rent': '17',
+            'lease': '17',
+            'sprinklers': '67',
+            'drip systems': '67',
+            'stationery': '19',
+            'printing': '19',
+            'supplies': '20',
+            'taxes': '21',
+            'licenses': '21',
+            'telephone': '77',
+            'phone': '77',
+            'travel': '22',
+            'travel meals': '23',
+            'utilities': '24',
+            'workers compensation': '57',
+            'workers comp': '57',
         }
 
         # Try exact match
@@ -185,6 +254,7 @@ class QuickbooksInvoiceService:
             # Check billing address
             if hasattr(customer, 'BillAddr') and customer.BillAddr:
                 bill_addr = f"{customer.BillAddr.Line1 or ''} {customer.BillAddr.Line2 or ''} {customer.BillAddr.City or ''}".lower()
+                
                 if address_lower in bill_addr or bill_addr in address_lower:
                     print(f"Customer matched: {customer.DisplayName} -> Address: {address}")
                     return customer.to_ref()
@@ -192,6 +262,7 @@ class QuickbooksInvoiceService:
             # Check shipping address
             if hasattr(customer, 'ShipAddr') and customer.ShipAddr:
                 ship_addr = f"{customer.ShipAddr.Line1 or ''} {customer.ShipAddr.Line2 or ''} {customer.ShipAddr.City or ''}".lower()
+               
                 if address_lower in ship_addr or ship_addr in address_lower:
                     print(f"Customer matched: {customer.DisplayName} -> Address: {address}")
                     return customer.to_ref()
@@ -290,6 +361,7 @@ class QuickbooksInvoiceService:
         bill = Bill()
         vendor = self.ensure_vendors(draft)
         bill.VendorRef = vendor.to_ref()
+        
 
         # Set dates
         if draft.invoice_date:
