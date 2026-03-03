@@ -24,12 +24,19 @@ def main():
     project_root = Path(__file__).parent.parent
     download_dir = project_root / "attachments"
     download_dir.mkdir(exist_ok=True)
-    qb_service = QuickbooksInvoiceService()
     openai_client = OpenAI()
 
-    # Get customer context for AI matching
-    print("Loading customer addresses for AI matching...")
-    customers_context = qb_service.get_customers_context()
+    # Lazy-init QuickBooks (only needed for invoices)
+    qb_service = None
+    customers_context = ""
+
+    def get_qb_service():
+        nonlocal qb_service, customers_context
+        if qb_service is None:
+            qb_service = QuickbooksInvoiceService()
+            print("Loading customer addresses for AI matching...")
+            customers_context = qb_service.get_customers_context()
+        return qb_service
 
     messages = list(fetch_messages_with_attachments(max_results=10))
 
@@ -162,18 +169,19 @@ def main():
                 print(draft.total_amount)
 
             # Route to correct QuickBooks transaction type
+            qb = get_qb_service()
             if hasattr(draft, 'is_receipt') and draft.is_receipt:
                 # Receipt (already paid) → Create Purchase
                 print(f"[{idx}/{len(messages)}] {message_id}: RECEIPT detected - creating Purchase (already paid)")
-                transaction = qb_service.push_receipt(draft)
+                transaction = qb.push_receipt(draft)
             else:
                 # Invoice (unpaid) → Create Bill
-                transaction = qb_service.push_invoice(draft)
+                transaction = qb.push_invoice(draft)
 
             # Attach the file
             if latest_file:
                 print(f"Attaching file: {latest_file}")
-                attach = qb_service.add_attachment(latest_file, transaction)
+                attach = qb.add_attachment(latest_file, transaction)
 
             transaction_id = getattr(transaction, "Id", None)
             if transaction_id:
