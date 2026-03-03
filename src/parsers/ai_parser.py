@@ -32,6 +32,8 @@ def invoice_label(message_text: str, attachments: list, client: Optional[OpenAI]
                     "- insurance: Insurance policies, claims, certificates of insurance, coverage documents, liability or workers comp.\n"
                     "- client_communications: General client emails, project updates, questions, scheduling, meeting requests, status reports.\n"
                     "- none: Spam, newsletters, promotions, or anything that does not fit the above categories.\n\n"
+                    "IMPORTANT: Automated notifications from BuilderTrend (e.g. 'Boris Jovanov created/updated a $X invoice') "
+                    "are NOT invoices. Classify them as 'none'.\n\n"
                     "Return only the label."
                 )},
                 {
