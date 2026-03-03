@@ -16,6 +16,8 @@ from services.notion_service import (
     _build_date,
     _build_select,
     _build_checkbox,
+    _build_email_link,
+    _build_tracking_link,
     INVOICE_DB_ID,
     SHIPPING_DB_ID,
     CLIENT_COMMS_DB_ID,
@@ -100,6 +102,43 @@ class TestHelperFunctions:
         assert _build_checkbox(None) is False
         print("Checkbox None becomes False")
 
+    def test_build_email_link(self):
+        result = _build_email_link("msg-abc-123")
+        assert result == "https://outlook.office365.com/mail/id/msg-abc-123"
+        print("Email link built correctly")
+
+    def test_build_email_link_none(self):
+        assert _build_email_link(None) is None
+        print("None message_id returns None")
+
+    def test_build_tracking_link_fedex(self):
+        result = _build_tracking_link("FedEx", "794644790138")
+        assert result == "https://www.fedex.com/fedextrack/?trknbr=794644790138"
+        print("FedEx tracking link built correctly")
+
+    def test_build_tracking_link_ups(self):
+        result = _build_tracking_link("UPS", "1Z999AA10123456784")
+        assert result == "https://www.ups.com/track?tracknum=1Z999AA10123456784"
+        print("UPS tracking link built correctly")
+
+    def test_build_tracking_link_usps(self):
+        result = _build_tracking_link("USPS", "9400111899223")
+        assert result == "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223"
+        print("USPS tracking link built correctly")
+
+    def test_build_tracking_link_unknown_carrier(self):
+        result = _build_tracking_link("DHL", "123456")
+        assert result is None
+        print("Unknown carrier returns None")
+
+    def test_build_tracking_link_none_carrier(self):
+        assert _build_tracking_link(None, "123") is None
+        print("None carrier returns None")
+
+    def test_build_tracking_link_none_tracking(self):
+        assert _build_tracking_link("FedEx", None) is None
+        print("None tracking number returns None")
+
 
 # ---------------------------------------------------------------------------
 # Invoice push tests
@@ -132,7 +171,7 @@ class TestPushInvoice:
         mock_resp.json.return_value = {"id": "page-123", "url": "https://notion.so/page-123"}
         mock_post.return_value = mock_resp
 
-        result = push_invoice_to_notion(self._sample_draft(), "Invoice from Acme")
+        result = push_invoice_to_notion(self._sample_draft(), "Invoice from Acme", "msg-inv-001")
 
         assert result["id"] == "page-123"
         call_json = mock_post.call_args.kwargs["json"]
@@ -144,6 +183,7 @@ class TestPushInvoice:
         assert props["Amount"]["number"] == 1500.00
         assert props["Status"]["select"]["name"] == "Received"
         assert props["Notes"]["rich_text"][0]["text"]["content"] == "March delivery"
+        assert props["Email Link"]["url"] == "https://outlook.office365.com/mail/id/msg-inv-001"
         print("Invoice pushed to Notion correctly")
 
     @patch("services.notion_service.requests.post")
@@ -177,6 +217,7 @@ class TestPushInvoice:
         assert props["Name"]["title"][0]["text"]["content"] == "Test Vendor"
         assert "Amount" not in props
         assert "Date" not in props
+        assert "Email Link" not in props
         print("Minimal invoice pushed correctly")
 
     @patch("services.notion_service.requests.post")
@@ -221,7 +262,7 @@ class TestPushShipping:
         mock_resp.json.return_value = {"id": "ship-123"}
         mock_post.return_value = mock_resp
 
-        result = push_shipping_to_notion(self._sample_shipping(), "FedEx Shipment")
+        result = push_shipping_to_notion(self._sample_shipping(), "FedEx Shipment", "msg-ship-001")
 
         assert result["id"] == "ship-123"
         props = mock_post.call_args.kwargs["json"]["properties"]
@@ -230,6 +271,9 @@ class TestPushShipping:
         assert props["Carrier"]["select"]["name"] == "FedEx"
         assert props["Status"]["select"]["name"] == "In Transit"
         assert props["Vendor"]["rich_text"][0]["text"]["content"] == "Home Depot"
+        assert props["Latest Event"]["rich_text"][0]["text"]["content"] == "in transit"
+        assert props["Tracking Link"]["url"] == "https://www.fedex.com/fedextrack/?trknbr=794644790138"
+        assert props["Email Link"]["url"] == "https://outlook.office365.com/mail/id/msg-ship-001"
         print("Shipping pushed to Notion correctly")
 
     @patch("services.notion_service.requests.post")
@@ -325,7 +369,7 @@ class TestPushClientComm:
         mock_resp.json.return_value = {"id": "client-123"}
         mock_post.return_value = mock_resp
 
-        result = push_client_comm_to_notion(self._sample_client(), "Re: Kitchen remodel")
+        result = push_client_comm_to_notion(self._sample_client(), "Re: Kitchen remodel", "msg-client-001")
 
         assert result["id"] == "client-123"
         props = mock_post.call_args.kwargs["json"]["properties"]
@@ -334,6 +378,7 @@ class TestPushClientComm:
         assert props["Project"]["rich_text"][0]["text"]["content"] == "Smith Residence"
         assert props["Urgency"]["select"]["name"] == "High"
         assert props["Response Needed"]["checkbox"] is True
+        assert props["Email Link"]["url"] == "https://outlook.office365.com/mail/id/msg-client-001"
         print("Client communication pushed to Notion correctly")
 
     @patch("services.notion_service.requests.post")

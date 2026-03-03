@@ -72,6 +72,25 @@ def _build_checkbox(value: Optional[bool]) -> bool:
     return bool(value)
 
 
+def _build_email_link(message_id: Optional[str]) -> Optional[str]:
+    """Build an Outlook web URL from a message ID."""
+    if not message_id:
+        return None
+    return f"https://outlook.office365.com/mail/id/{message_id}"
+
+
+def _build_tracking_link(carrier: Optional[str], tracking_number: Optional[str]) -> Optional[str]:
+    """Build a carrier tracking URL from carrier name and tracking number."""
+    if not carrier or not tracking_number:
+        return None
+    carrier_urls = {
+        "fedex": f"https://www.fedex.com/fedextrack/?trknbr={tracking_number}",
+        "ups": f"https://www.ups.com/track?tracknum={tracking_number}",
+        "usps": f"https://tools.usps.com/go/TrackConfirmAction?tLabels={tracking_number}",
+    }
+    return carrier_urls.get(carrier.lower())
+
+
 def _create_page(database_id: str, properties: dict) -> dict:
     """Create a page in a Notion database."""
     payload = {
@@ -93,7 +112,7 @@ def _create_page(database_id: str, properties: dict) -> dict:
     return response.json()
 
 
-def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "") -> dict:
+def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "", message_id: str = "") -> dict:
     """Push an invoice draft to the Invoice Tracker database."""
     properties = {
         "Name": {"title": _build_title(draft.vendor_display_name or subject or "Invoice")},
@@ -116,10 +135,14 @@ def push_invoice_to_notion(draft: InvoiceDraft, subject: str = "") -> dict:
         if date_val:
             properties["Due Date"] = {"date": date_val}
 
+    email_link = _build_email_link(message_id)
+    if email_link:
+        properties["Email Link"] = {"url": email_link}
+
     return _create_page(INVOICE_DB_ID, properties)
 
 
-def push_shipping_to_notion(data: ShippingData, subject: str = "") -> dict:
+def push_shipping_to_notion(data: ShippingData, subject: str = "", message_id: str = "") -> dict:
     """Push shipping data to the Shipping Tracker database."""
     # Build title from carrier + tracking or order number
     title_parts = []
@@ -186,10 +209,21 @@ def push_shipping_to_notion(data: ShippingData, subject: str = "") -> dict:
         if date_val:
             properties["Expected Delivery"] = {"date": date_val}
 
+    if data.delivery_status:
+        properties["Latest Event"] = {"rich_text": _build_rich_text(data.delivery_status)}
+
+    tracking_link = _build_tracking_link(data.carrier, data.tracking_number)
+    if tracking_link:
+        properties["Tracking Link"] = {"url": tracking_link}
+
+    email_link = _build_email_link(message_id)
+    if email_link:
+        properties["Email Link"] = {"url": email_link}
+
     return _create_page(SHIPPING_DB_ID, properties)
 
 
-def push_client_comm_to_notion(data: ClientData, subject: str = "") -> dict:
+def push_client_comm_to_notion(data: ClientData, subject: str = "", message_id: str = "") -> dict:
     """Push client communication data to the Client Communications database."""
     # Use the parsed subject or fall back to email subject
     title = data.subject or subject or "Client Communication"
@@ -228,5 +262,9 @@ def push_client_comm_to_notion(data: ClientData, subject: str = "") -> dict:
 
     if urgency:
         properties["Urgency"] = {"select": _build_select(urgency)}
+
+    email_link = _build_email_link(message_id)
+    if email_link:
+        properties["Email Link"] = {"url": email_link}
 
     return _create_page(CLIENT_COMMS_DB_ID, properties)

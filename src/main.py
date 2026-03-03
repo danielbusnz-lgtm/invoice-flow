@@ -80,7 +80,7 @@ def main():
                     for item in shipping_data.items:
                         print(f"  Item: {item.description} (qty: {item.quantity})")
                 try:
-                    notion_page = push_shipping_to_notion(shipping_data, subject)
+                    notion_page = push_shipping_to_notion(shipping_data, subject, message_id)
                     print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Shipping Tracker")
                 except Exception as e:
                     print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
@@ -107,7 +107,7 @@ def main():
                     for date in client_data.key_dates:
                         print(f"    * {date}")
                 try:
-                    notion_page = push_client_comm_to_notion(client_data, subject)
+                    notion_page = push_client_comm_to_notion(client_data, subject, message_id)
                     print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Client Communications")
                 except Exception as e:
                     print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
@@ -191,7 +191,7 @@ def main():
 
             # Push to Notion Invoice Tracking
             try:
-                notion_page = push_invoice_to_notion(draft, subject)
+                notion_page = push_invoice_to_notion(draft, subject, message_id)
                 print(f"[{idx}/{len(messages)}] {message_id}: pushed to Notion Invoice Tracking")
             except Exception as e:
                 print(f"[{idx}/{len(messages)}] {message_id}: failed to push to Notion: {e}")
