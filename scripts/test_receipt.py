@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from services.quickbooks_service import QuickbooksInvoiceService
 from models.invoice import InvoiceLine, InvoiceDraft
 import datetime
-
+#daniel
 # Create test receipt data
 line_items = [
     InvoiceLine(
